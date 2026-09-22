@@ -18,6 +18,12 @@ general rating) + `Tier · Win%` from `/api/runs/metrics/relics`, and a
 `pairs:` line naming the held cards that pair best with the relic
 (`/api/pairings/relics/{id}` intersected with your deck).
 
+**Event option buttons** (Neow's blessings and any other event option
+that grants a relic) get the relic overlay docked to the right edge of
+the button, ranked against each other by score. Options in the ancient's
+cursed pool are marked `CURSE` in red (detected from the option's
+loc key).
+
 No manual input needed: the mod reads your deck, relics and the offered
 cards straight from the running game.
 
@@ -27,6 +33,8 @@ cards straight from the running game.
 - "Choose a card" screens (`NChooseACardSelectionScreen`)
 - "Choose a relic" screens (`NChooseARelicSelection`)
 - Merchant shop (`NMerchantInventory`) — badges under each card/relic for sale
+- Event screens (`NEventLayout`, incl. Neow) — badges on any option
+  button that grants a relic
 
 ## Install
 
@@ -68,7 +76,8 @@ dotnet build -c Release -p:Sts2DataDir="C:/Program Files (x86)/Steam/steamapps/c
 - Postfix patches on `AfterOverlayOpened` / `RefreshOptions` /
   `AfterOverlayClosed` of the selection screens drive an `AdviceFlow`.
 - Offered items are found by scanning the screen for `NCardHolder` /
-  `NCard` (cards) and `NRelic` / `NRelicBasicHolder` (relics) nodes
+  `NCard` (cards), `NRelic` / `NRelicBasicHolder` (relics) and
+  `NEventOptionButton` nodes carrying `Option.Relic`
   (identity via `Model.Id.Entry`, e.g. `SHRUG_IT_OFF`).
 - Deck and relics come from `NRun._state` → `RunState` → `Player.Deck`
   (same access path other StS2 mods use).
@@ -85,5 +94,7 @@ community — treat them as reference, not gospel.
 
 - Co-op: uses the local player's deck (falls back to `Players[0]`).
 - Potion slots in the shop are not annotated.
+- Neow recommendations are a proxy: spire-codex has no per-Neow-option
+  stats, so each option is scored by the relic it grants.
 - Requires internet on first reward screen (metrics table is cached
   for 30 min afterwards).

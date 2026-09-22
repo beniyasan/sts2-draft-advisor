@@ -83,10 +83,23 @@ public static class AdvisorUi
             var root = new Control { Name = "DraftAdvisorBadge", MouseFilter = Control.MouseFilterEnum.Ignore };
 
             // Badge geometry: cards are ~300x420 (center origin → y+218 is below);
-            // relic icons are ~90px (center origin → y+60 is below).
-            var (x1, y1, w1) = offer.IsRelic ? (-110f, 60f, 220f) : (-140f, 218f, 280f);
-            var (x2, y2, w2) = offer.IsRelic ? (-110f, 78f, 220f) : (-140f, 240f, 280f);
-            var (x3, y3, w3) = offer.IsRelic ? (-110f, 94f, 240f) : (-160f, 258f, 320f);
+            // relic icons ~90px (center origin → y+60 below); event option buttons
+            // are wide rows — badge docks to the button's right edge instead.
+            float x1, y1, w1, x2, y2, w2, x3, y3, w3;
+            if (offer.IsEventOption)
+            {
+                var bw = offer.Node.Size.X;
+                var bx = Mathf.Max(0f, bw > 320f ? bw - 310f : 60f);
+                (x1, y1, w1) = (bx, 10f, 300f);
+                (x2, y2, w2) = (bx, 28f, 300f);
+                (x3, y3, w3) = (bx, 44f, 300f);
+            }
+            else
+            {
+                (x1, y1, w1) = offer.IsRelic ? (-110f, 60f, 220f) : (-140f, 218f, 280f);
+                (x2, y2, w2) = offer.IsRelic ? (-110f, 78f, 220f) : (-140f, 240f, 280f);
+                (x3, y3, w3) = offer.IsRelic ? (-110f, 94f, 240f) : (-160f, 258f, 320f);
+            }
 
             // --- Rank / context score line ---
             var line1 = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -102,12 +115,15 @@ public static class AdvisorUi
                     : offer.CoachScore is double cs && cs > 0
                         ? $"Coach {(int)Math.Round(cs)}"
                         : "";
-            line1.Text = $"{rankTxt}{fitTxt}";
+            line1.Text = $"{(offer.IsCursed ? "CURSE  " : "")}{rankTxt}{fitTxt}";
             line1.AddThemeFontSizeOverride("font_size", 17);
-            line1.AddThemeColorOverride("font_color", RankColor(offer.AdviceRank));
+            line1.AddThemeColorOverride("font_color",
+                offer.IsCursed ? new Color("ff5555") : RankColor(offer.AdviceRank));
             line1.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
             line1.AddThemeConstantOverride("outline_size", 6);
-            line1.HorizontalAlignment = HorizontalAlignment.Center;
+            line1.HorizontalAlignment = offer.IsEventOption
+                ? HorizontalAlignment.Right
+                : HorizontalAlignment.Center;
             line1.Position = new Vector2(x1, y1);
             line1.Size = new Vector2(w1, 22);
             root.AddChild(line1);
@@ -131,7 +147,9 @@ public static class AdvisorUi
             line2.AddThemeFontSizeOverride("font_size", 13);
             line2.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
             line2.AddThemeConstantOverride("outline_size", 5);
-            line2.HorizontalAlignment = HorizontalAlignment.Center;
+            line2.HorizontalAlignment = offer.IsEventOption
+                ? HorizontalAlignment.Right
+                : HorizontalAlignment.Center;
             line2.Position = new Vector2(x2, y2);
             line2.Size = new Vector2(w2, 18);
             root.AddChild(line2);
@@ -146,7 +164,9 @@ public static class AdvisorUi
                 line3.AddThemeColorOverride("font_color", new Color(0.85f, 0.78f, 0.6f));
                 line3.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
                 line3.AddThemeConstantOverride("outline_size", 4);
-                line3.HorizontalAlignment = HorizontalAlignment.Center;
+                line3.HorizontalAlignment = offer.IsEventOption
+                    ? HorizontalAlignment.Right
+                    : HorizontalAlignment.Center;
                 line3.Position = new Vector2(x3, y3);
                 line3.Size = new Vector2(w3, 16);
                 root.AddChild(line3);
