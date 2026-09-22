@@ -87,11 +87,15 @@ public static class AdvisorUi
             var rankTxt = offer.AdviceRank is int r && r <= RankColors.Length
                 ? $"#{r}  "
                 : "";
-            var fitTxt = offer.AdviceScore is double sc && sc > 0
-                ? $"Fit {(int)Math.Round(sc * 100)}%"
-                : offer.CoachScore is double cs && cs > 0
-                    ? $"Coach {(int)Math.Round(cs)}"
-                    : "";
+            var fitTxt = offer.IsRelic
+                ? offer.Metrics is { Score: > 0 } ms
+                    ? $"Score {ms.Score:0}"
+                    : ""
+                : offer.AdviceScore is double sc && sc > 0
+                    ? $"Fit {(int)Math.Round(sc * 100)}%"
+                    : offer.CoachScore is double cs && cs > 0
+                        ? $"Coach {(int)Math.Round(cs)}"
+                        : "";
             line1.Text = $"{rankTxt}{fitTxt}";
             line1.AddThemeFontSizeOverride("font_size", 17);
             line1.AddThemeColorOverride("font_color", RankColor(offer.AdviceRank));
@@ -107,9 +111,10 @@ public static class AdvisorUi
             var line2 = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
             if (m != null)
             {
-                var pick = $"{m.PickRate:0}%";
                 var win = $"{m.WinRate:0}%";
-                line2.Text = $"{m.Tier} · Pick {pick} · Win {win}";
+                line2.Text = m.PickRate is double pr
+                    ? $"{m.Tier} · Pick {pr:0}% · Win {win}"
+                    : $"{m.Tier} · Win {win}";
                 line2.AddThemeColorOverride("font_color", TierColors.GetValueOrDefault(m.Tier, TierColors["?"]));
             }
             else
@@ -150,10 +155,16 @@ public static class AdvisorUi
         }
     }
 
-    /// <summary>Top reasons from draft-advice: "Setup Strike ×3.0 · Inflame ×2.1".</summary>
+    /// <summary>Cards: "pairs: Setup Strike ×3.0". Relics: "pairs: Mad Science".</summary>
     private static string? TopReasonText(
         OfferAdvice offer, IReadOnlyDictionary<string, string> heldNames)
     {
+        if (offer.IsRelic)
+        {
+            return offer.PairNames.Count == 0
+                ? null
+                : $"pairs: {string.Join(" · ", offer.PairNames)}";
+        }
         if (offer.Reasons.Count == 0) return null;
         var parts = new List<string>();
         foreach (var r in offer.Reasons.Take(2))

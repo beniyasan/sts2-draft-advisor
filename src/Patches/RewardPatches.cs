@@ -1,6 +1,8 @@
 using DraftAdvisor.Advisor;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
+using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 
 namespace DraftAdvisor.Patches;
 
@@ -44,6 +46,47 @@ public static class ChooseCardOpenedPatch
 
 [HarmonyPatch(typeof(NChooseACardSelectionScreen), nameof(NChooseACardSelectionScreen.AfterOverlayClosed))]
 public static class ChooseCardClosedPatch
+{
+    [HarmonyPostfix]
+    public static void AfterClosed()
+        => AdviceFlow.OnScreenClosed();
+}
+
+/// <summary>
+/// Relic pick screens ("choose a relic"). NRelic nodes are scanned for offers.
+/// </summary>
+[HarmonyPatch(typeof(NChooseARelicSelection), nameof(NChooseARelicSelection.AfterOverlayOpened))]
+public static class ChooseRelicOpenedPatch
+{
+    [HarmonyPostfix]
+    public static void AfterOpened(NChooseARelicSelection __instance)
+        => AdviceFlow.OnScreenOpened(__instance);
+}
+
+[HarmonyPatch(typeof(NChooseARelicSelection), nameof(NChooseARelicSelection.AfterOverlayClosed))]
+public static class ChooseRelicClosedPatch
+{
+    [HarmonyPostfix]
+    public static void AfterClosed()
+        => AdviceFlow.OnScreenClosed();
+}
+
+/// <summary>
+/// Merchant shop: card slots contain NCard children, relic slots NRelic children —
+/// the same tree scan covers both. Badges show under each purchasable item.
+/// </summary>
+[HarmonyPatch(typeof(NMerchantInventory), nameof(NMerchantInventory.Open))]
+public static class MerchantOpenedPatch
+{
+    [HarmonyPostfix]
+    public static void AfterOpened(NMerchantInventory __instance)
+        => AdviceFlow.OnScreenOpened(__instance);
+}
+
+// Close() is private; _ExitTree is the reliable "screen gone" hook — badges are
+// children of the merchant nodes and die with them anyway.
+[HarmonyPatch(typeof(NMerchantInventory), nameof(NMerchantInventory._ExitTree))]
+public static class MerchantClosedPatch
 {
     [HarmonyPostfix]
     public static void AfterClosed()
