@@ -92,3 +92,24 @@ public static class MerchantClosedPatch
     public static void AfterClosed()
         => AdviceFlow.OnScreenClosed();
 }
+
+/// <summary>
+/// A merchant slot got (re)filled — restock after purchase or a reroll.
+/// Triggers a rescan so the new item gets a badge too. Harmless during the
+/// initial fill: OnContentChanged is a no-op until Open has tracked the screen.
+/// </summary>
+[HarmonyPatch(typeof(NMerchantCard), nameof(NMerchantCard.FillSlot))]
+public static class MerchantCardFillPatch
+{
+    [HarmonyPostfix]
+    public static void AfterFill()
+        => AdviceFlow.OnContentChanged();
+}
+
+[HarmonyPatch(typeof(NMerchantRelic), nameof(NMerchantRelic.FillSlot))]
+public static class MerchantRelicFillPatch
+{
+    [HarmonyPostfix]
+    public static void AfterFill()
+        => AdviceFlow.OnContentChanged();
+}

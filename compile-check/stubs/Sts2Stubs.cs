@@ -156,7 +156,18 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens
         public class NMerchantInventory : Control
         {
             public void Open() { }
-            public void Close() { }
+        }
+
+        public abstract class NMerchantSlot : Control { }
+
+        public class NMerchantCard : NMerchantSlot
+        {
+            public void FillSlot(object cardEntry) { }
+        }
+
+        public class NMerchantRelic : NMerchantSlot
+        {
+            public void FillSlot(object relicEntry) { }
         }
     }
 }

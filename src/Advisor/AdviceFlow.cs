@@ -46,10 +46,12 @@ public sealed class OfferAdvice
 public static class AdviceFlow
 {
     private static volatile int _generation;
+    private static Node? _currentScreen;
 
     /// <summary>Called from Harmony postfix when a selection screen opens or refreshes.</summary>
     public static void OnScreenOpened(Node screen)
     {
+        _currentScreen = screen;
         var gen = ++_generation;
         AdvisorUi.Clear();
         Callable.From(() => TryScan(screen, gen, 0)).CallDeferred();
@@ -59,7 +61,19 @@ public static class AdviceFlow
     public static void OnScreenClosed()
     {
         _generation++;
+        _currentScreen = null;
         AdvisorUi.Clear();
+    }
+
+    /// <summary>
+    /// Content of the tracked screen changed (e.g. a merchant slot refilled).
+    /// No-op before the first screen open.
+    /// </summary>
+    public static void OnContentChanged()
+    {
+        var screen = _currentScreen;
+        if (screen == null || !GodotObject.IsInstanceValid(screen)) return;
+        OnScreenOpened(screen);
     }
 
     /// <summary>
@@ -95,7 +109,9 @@ public static class AdviceFlow
             }
 
             var offeredCardIds = offers.Where(o => !o.IsRelic).Select(o => o.Id).ToList();
-            var offeredRelicIds = offers.Where(o => o.IsRelic).Select(o => o.Id).ToList();
+            // Pairings are fetched once per distinct relic id; duplicates share advice.
+            var distinctRelicIds = offers.Where(o => o.IsRelic).Select(o => o.Id)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
             // HTTP only on a background thread; no Godot objects touched there.
             _ = Task.Run(async () =>
@@ -109,10 +125,10 @@ public static class AdviceFlow
                 var m = offeredCardIds.Count > 0
                     ? CodexClient.GetCardMetrics()
                     : Task.FromResult<Dictionary<string, MetricRow>?>(null);
-                var rm = offeredRelicIds.Count > 0
+                var rm = distinctRelicIds.Count > 0
                     ? CodexClient.GetRelicMetrics()
                     : Task.FromResult<Dictionary<string, MetricRow>?>(null);
-                var rp = offeredRelicIds.Select(id => CodexClient.GetRelicPairings(id)).ToArray();
+                var rp = distinctRelicIds.Select(id => CodexClient.GetRelicPairings(id)).ToArray();
 
                 await Task.WhenAll(new Task[] { a, c, m, rm }.Concat(rp)).ConfigureAwait(false);
 
@@ -126,7 +142,7 @@ public static class AdviceFlow
                 {
                     if (gen != _generation || !GodotObject.IsInstanceValid(screen)) return;
                     MergeAdvice(offers, advice, coach, metrics);
-                    MergeRelicAdvice(offers, offeredRelicIds, relicMetrics, relicPairings, snap);
+                    MergeRelicAdvice(offers, distinctRelicIds, relicMetrics, relicPairings, snap);
                     AdvisorUi.Render(
                         screen, offers, snap.ItemNames,
                         coach?.Target?.Name, coach?.Target?.Similarity ?? 0);
@@ -255,18 +271,21 @@ public static class AdviceFlow
         PickCoachResponse? coach,
         Dictionary<string, MetricRow>? metrics)
     {
+        // Merge into EVERY offer matching the id — identical cards can occupy
+        // several slots (e.g. shop restock) and each badge needs the same advice.
         if (advice?.Ranked != null)
         {
             for (int i = 0; i < advice.Ranked.Count; i++)
             {
                 var r = advice.Ranked[i];
-                var offer = offers.FirstOrDefault(o =>
-                    string.Equals(o.Id, r.Id, StringComparison.OrdinalIgnoreCase));
-                if (offer == null) continue;
-                offer.AdviceRank = i + 1;
-                offer.AdviceScore = r.Score;
-                offer.AdviceBase = r.Base;
-                offer.Reasons = r.Reasons ?? new();
+                foreach (var offer in offers.Where(o => !o.IsRelic &&
+                    string.Equals(o.Id, r.Id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    offer.AdviceRank = i + 1;
+                    offer.AdviceScore = r.Score;
+                    offer.AdviceBase = r.Base;
+                    offer.Reasons = r.Reasons ?? new();
+                }
             }
         }
 
@@ -274,12 +293,13 @@ public static class AdviceFlow
         {
             foreach (var c in coach.Offers)
             {
-                var offer = offers.FirstOrDefault(o =>
-                    string.Equals(o.Id, c.Id, StringComparison.OrdinalIgnoreCase));
-                if (offer == null) continue;
-                offer.CoachScore = c.CoachScore;
-                offer.CommitmentDelta = c.CommitmentDelta;
-                offer.WinnerSupport = c.WinnerSupport;
+                foreach (var offer in offers.Where(o => !o.IsRelic &&
+                    string.Equals(o.Id, c.Id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    offer.CoachScore = c.CoachScore;
+                    offer.CommitmentDelta = c.CommitmentDelta;
+                    offer.WinnerSupport = c.WinnerSupport;
+                }
             }
         }
 
@@ -307,21 +327,17 @@ public static class AdviceFlow
         var deckIds = new HashSet<string>(snap.DeckCardIds, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < relicIds.Count; i++)
         {
-            var offer = offers.FirstOrDefault(o => o.IsRelic &&
-                string.Equals(o.Id, relicIds[i], StringComparison.OrdinalIgnoreCase));
-            if (offer == null) continue;
-
-            if (metrics != null && metrics.TryGetValue(offer.Id, out var m))
-                offer.Metrics = m;
-
             var partners = i < pairings.Count ? pairings[i]?.Partners.Cards : null;
-            if (partners != null)
+            var pairNames = partners == null
+                ? new List<string>()
+                : partners.Where(p => deckIds.Contains(p.Id)).Take(2).Select(p => p.Name).ToList();
+
+            foreach (var offer in offers.Where(o => o.IsRelic &&
+                string.Equals(o.Id, relicIds[i], StringComparison.OrdinalIgnoreCase)))
             {
-                offer.PairNames = partners
-                    .Where(p => deckIds.Contains(p.Id))
-                    .Take(2)
-                    .Select(p => p.Name)
-                    .ToList();
+                if (metrics != null && metrics.TryGetValue(offer.Id, out var m))
+                    offer.Metrics = m;
+                offer.PairNames = pairNames;
             }
         }
     }
