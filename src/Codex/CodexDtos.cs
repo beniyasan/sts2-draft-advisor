@@ -24,15 +24,15 @@ public sealed class DraftAdviceResponse
     [JsonPropertyName("ranked")] public List<DraftRanked> Ranked { get; set; } = new();
 }
 
-/// <summary>GET /api/runs/metrics/cards response row.</summary>
+/// <summary>GET /api/runs/metrics/{entity} response row (cards, relics).</summary>
 public sealed class MetricRow
 {
     [JsonPropertyName("id")] public string Id { get; set; } = "";
     [JsonPropertyName("score")] public double Score { get; set; }
     [JsonPropertyName("tier")] public string Tier { get; set; } = "?";
-    [JsonPropertyName("elo")] public double Elo { get; set; }
+    [JsonPropertyName("elo")] public double? Elo { get; set; }
     [JsonPropertyName("win_rate")] public double WinRate { get; set; }
-    [JsonPropertyName("pick_rate")] public double PickRate { get; set; }
+    [JsonPropertyName("pick_rate")] public double? PickRate { get; set; }
 }
 
 public sealed class MetricsResponse
@@ -65,4 +65,25 @@ public sealed class PickCoachResponse
     [JsonPropertyName("available")] public bool Available { get; set; }
     [JsonPropertyName("target")] public CoachArchetype? Target { get; set; }
     [JsonPropertyName("offers")] public List<CoachOffer> Offers { get; set; } = new();
+}
+
+/// <summary>GET /api/pairings/{kind}/{id} response.</summary>
+public sealed class PartnerRow
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("npmi")] public double Npmi { get; set; }
+    [JsonPropertyName("conf")] public double Conf { get; set; }
+    [JsonPropertyName("winrate")] public double Winrate { get; set; }
+}
+
+public sealed class PartnerGroups
+{
+    [JsonPropertyName("cards")] public List<PartnerRow> Cards { get; set; } = new();
+    [JsonPropertyName("relics")] public List<PartnerRow> Relics { get; set; } = new();
+}
+
+public sealed class PairingsResponse
+{
+    [JsonPropertyName("partners")] public PartnerGroups Partners { get; set; } = new();
 }

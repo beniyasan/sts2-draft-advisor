@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
+using MegaCrit.Sts2.Core.Nodes.Relics;
 
 namespace DraftAdvisor.Advisor;
 
@@ -17,11 +18,15 @@ public sealed class OfferAdvice
     public required string Id;
     public required Control Node;
     public required string DisplayName;
+    public bool IsRelic;
 
     public int? AdviceRank;
     public double? AdviceScore;
     public double? AdviceBase;
     public List<DraftReason> Reasons = new();
+
+    /// <summary>Relic offers: names of held cards that pair with this relic.</summary>
+    public List<string> PairNames = new();
 
     public double? CoachScore;
     public double? CommitmentDelta;
@@ -41,10 +46,12 @@ public sealed class OfferAdvice
 public static class AdviceFlow
 {
     private static volatile int _generation;
+    private static Node? _currentScreen;
 
     /// <summary>Called from Harmony postfix when a selection screen opens or refreshes.</summary>
     public static void OnScreenOpened(Node screen)
     {
+        _currentScreen = screen;
         var gen = ++_generation;
         AdvisorUi.Clear();
         Callable.From(() => TryScan(screen, gen, 0)).CallDeferred();
@@ -54,7 +61,19 @@ public static class AdviceFlow
     public static void OnScreenClosed()
     {
         _generation++;
+        _currentScreen = null;
         AdvisorUi.Clear();
+    }
+
+    /// <summary>
+    /// Content of the tracked screen changed (e.g. a merchant slot refilled).
+    /// No-op before the first screen open.
+    /// </summary>
+    public static void OnContentChanged()
+    {
+        var screen = _currentScreen;
+        if (screen == null || !GodotObject.IsInstanceValid(screen)) return;
+        OnScreenOpened(screen);
     }
 
     /// <summary>
@@ -89,24 +108,41 @@ public static class AdviceFlow
                 return;
             }
 
-            var offeredIds = offers.Select(o => o.Id).ToList();
+            var offeredCardIds = offers.Where(o => !o.IsRelic).Select(o => o.Id).ToList();
+            // Pairings are fetched once per distinct relic id; duplicates share advice.
+            var distinctRelicIds = offers.Where(o => o.IsRelic).Select(o => o.Id)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
             // HTTP only on a background thread; no Godot objects touched there.
             _ = Task.Run(async () =>
             {
-                var a = CodexClient.GetDraftAdvice(snap.HeldItems, offeredIds);
+                var a = offeredCardIds.Count > 0
+                    ? CodexClient.GetDraftAdvice(snap.HeldItems, offeredCardIds)
+                    : Task.FromResult<DraftAdviceResponse?>(null);
+                // Empty offer is fine for pick-coach: it still resolves the archetype.
                 var c = CodexClient.GetPickCoach(
-                    snap.Character, snap.DeckCardIds, snap.RelicIds, offeredIds);
-                var m = CodexClient.GetCardMetrics();
-                await Task.WhenAll(a, c, m).ConfigureAwait(false);
+                    snap.Character, snap.DeckCardIds, snap.RelicIds, offeredCardIds);
+                var m = offeredCardIds.Count > 0
+                    ? CodexClient.GetCardMetrics()
+                    : Task.FromResult<Dictionary<string, MetricRow>?>(null);
+                var rm = distinctRelicIds.Count > 0
+                    ? CodexClient.GetRelicMetrics()
+                    : Task.FromResult<Dictionary<string, MetricRow>?>(null);
+                var rp = distinctRelicIds.Select(id => CodexClient.GetRelicPairings(id)).ToArray();
+
+                await Task.WhenAll(new Task[] { a, c, m, rm }.Concat(rp)).ConfigureAwait(false);
+
                 var advice = a.Result;
                 var coach = c.Result;
                 var metrics = m.Result;
+                var relicMetrics = rm.Result;
+                var relicPairings = rp.Select(t => t.Result).ToList();
 
                 Callable.From(() =>
                 {
                     if (gen != _generation || !GodotObject.IsInstanceValid(screen)) return;
                     MergeAdvice(offers, advice, coach, metrics);
+                    MergeRelicAdvice(offers, distinctRelicIds, relicMetrics, relicPairings, snap);
                     AdvisorUi.Render(
                         screen, offers, snap.ItemNames,
                         coach?.Target?.Name, coach?.Target?.Similarity ?? 0);
@@ -119,15 +155,20 @@ public static class AdviceFlow
         }
     }
 
-    /// <summary>Find offered cards: NCardHolder (grid) then bare NCard nodes (bundles).</summary>
+    /// <summary>Find offered cards and relics anywhere under the screen node.</summary>
     private static List<OfferAdvice> ScanOffers(Node screen)
     {
-        var found = new List<(Control node, CardModel model)>();
-        FindCardsInTree(screen, found, 0);
+        var cards = new List<(Control node, CardModel model)>();
+        var relics = new List<(Control node, RelicModel model)>();
+        FindOffersInTree(screen, cards, relics, 0);
 
+        // Dedupe by node, not by id: the same card id can legitimately appear
+        // in multiple slots (e.g. two copies for sale) and each needs a badge.
+        // Holder/inner-child double-counting is prevented by FindOffersInTree
+        // not recursing into matched holders.
         var offers = new List<OfferAdvice>();
         var seen = new HashSet<Control>();
-        foreach (var (node, model) in found)
+        foreach (var (node, model) in cards)
         {
             if (!seen.Add(node)) continue;
             var id = RunInspector.NormalizeId(SafeEntry(model));
@@ -139,16 +180,29 @@ public static class AdviceFlow
                 DisplayName = SafeTitle(model) ?? Prettify(id),
             });
         }
+        foreach (var (node, model) in relics)
+        {
+            if (!seen.Add(node)) continue;
+            var id = RunInspector.NormalizeId(SafeEntry(model));
+            if (string.IsNullOrEmpty(id)) continue;
+            offers.Add(new OfferAdvice
+            {
+                Id = id,
+                Node = node,
+                DisplayName = SafeTitle(model) ?? Prettify(id),
+                IsRelic = true,
+            });
+        }
         return offers;
     }
 
-    private static string? SafeEntry(CardModel model)
+    private static string? SafeEntry(AbstractModel model)
     {
         try { return model.Id.Entry; } catch { return null; }
     }
 
-    /// <summary>Title may be a plain string or a localized text object.</summary>
-    private static string? SafeTitle(CardModel model)
+    /// <summary>Title may be a plain string (cards) or a LocString (relics).</summary>
+    private static string? SafeTitle(AbstractModel model)
     {
         try
         {
@@ -175,7 +229,11 @@ public static class AdviceFlow
         return string.Join(" ", parts);
     }
 
-    private static void FindCardsInTree(Node parent, List<(Control, CardModel)> results, int depth)
+    private static void FindOffersInTree(
+        Node parent,
+        List<(Control, CardModel)> cards,
+        List<(Control, RelicModel)> relics,
+        int depth)
     {
         if (depth > 15) return;
         foreach (var child in parent.GetChildren())
@@ -183,15 +241,27 @@ public static class AdviceFlow
             if (child == null) continue;
             if (child is NCardHolder holder && holder.CardModel != null)
             {
-                results.Add((holder, holder.CardModel));
+                cards.Add((holder, holder.CardModel));
                 continue;
             }
             if (child is NCard card && card.Model != null)
             {
-                results.Add((card, card.Model));
+                cards.Add((card, card.Model));
                 continue;
             }
-            FindCardsInTree(child, results, depth + 1);
+            // NRelicBasicHolder wraps an NRelic child: prefer the holder (better
+            // anchor) and do NOT recurse into it, else the same relic is scanned twice.
+            if (child is NRelicBasicHolder relicHolder && relicHolder.Relic?.Model != null)
+            {
+                relics.Add((relicHolder, relicHolder.Relic.Model));
+                continue;
+            }
+            if (child is NRelic relic && relic.Model != null)
+            {
+                relics.Add((relic, relic.Model));
+                continue;
+            }
+            FindOffersInTree(child, cards, relics, depth + 1);
         }
     }
 
@@ -201,18 +271,21 @@ public static class AdviceFlow
         PickCoachResponse? coach,
         Dictionary<string, MetricRow>? metrics)
     {
+        // Merge into EVERY offer matching the id — identical cards can occupy
+        // several slots (e.g. shop restock) and each badge needs the same advice.
         if (advice?.Ranked != null)
         {
             for (int i = 0; i < advice.Ranked.Count; i++)
             {
                 var r = advice.Ranked[i];
-                var offer = offers.FirstOrDefault(o =>
-                    string.Equals(o.Id, r.Id, StringComparison.OrdinalIgnoreCase));
-                if (offer == null) continue;
-                offer.AdviceRank = i + 1;
-                offer.AdviceScore = r.Score;
-                offer.AdviceBase = r.Base;
-                offer.Reasons = r.Reasons ?? new();
+                foreach (var offer in offers.Where(o => !o.IsRelic &&
+                    string.Equals(o.Id, r.Id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    offer.AdviceRank = i + 1;
+                    offer.AdviceScore = r.Score;
+                    offer.AdviceBase = r.Base;
+                    offer.Reasons = r.Reasons ?? new();
+                }
             }
         }
 
@@ -220,21 +293,51 @@ public static class AdviceFlow
         {
             foreach (var c in coach.Offers)
             {
-                var offer = offers.FirstOrDefault(o =>
-                    string.Equals(o.Id, c.Id, StringComparison.OrdinalIgnoreCase));
-                if (offer == null) continue;
-                offer.CoachScore = c.CoachScore;
-                offer.CommitmentDelta = c.CommitmentDelta;
-                offer.WinnerSupport = c.WinnerSupport;
+                foreach (var offer in offers.Where(o => !o.IsRelic &&
+                    string.Equals(o.Id, c.Id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    offer.CoachScore = c.CoachScore;
+                    offer.CommitmentDelta = c.CommitmentDelta;
+                    offer.WinnerSupport = c.WinnerSupport;
+                }
             }
         }
 
         if (metrics != null)
         {
-            foreach (var offer in offers)
+            foreach (var offer in offers.Where(o => !o.IsRelic))
             {
                 if (metrics.TryGetValue(offer.Id, out var m))
                     offer.Metrics = m;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Relic offers: generic metrics (tier/score/win%) plus deck-fit reasons built
+    /// by intersecting the relic's top card partners with the player's deck.
+    /// </summary>
+    private static void MergeRelicAdvice(
+        List<OfferAdvice> offers,
+        IReadOnlyList<string> relicIds,
+        Dictionary<string, MetricRow>? metrics,
+        IReadOnlyList<PairingsResponse?> pairings,
+        RunInspector.Snapshot snap)
+    {
+        var deckIds = new HashSet<string>(snap.DeckCardIds, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < relicIds.Count; i++)
+        {
+            var partners = i < pairings.Count ? pairings[i]?.Partners.Cards : null;
+            var pairNames = partners == null
+                ? new List<string>()
+                : partners.Where(p => deckIds.Contains(p.Id)).Take(2).Select(p => p.Name).ToList();
+
+            foreach (var offer in offers.Where(o => o.IsRelic &&
+                string.Equals(o.Id, relicIds[i], StringComparison.OrdinalIgnoreCase)))
+            {
+                if (metrics != null && metrics.TryGetValue(offer.Id, out var m))
+                    offer.Metrics = m;
+                offer.PairNames = pairNames;
             }
         }
     }

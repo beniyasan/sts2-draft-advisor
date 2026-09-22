@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Json;
 using System.Text.Json;
 using MegaCrit.Sts2.Core.Logging;
@@ -31,8 +32,7 @@ public static class CodexClient
         PropertyNameCaseInsensitive = true,
     };
 
-    private static Dictionary<string, MetricRow>? _metricsCache;
-    private static DateTime _metricsFetchedAt = DateTime.MinValue;
+    private static readonly ConcurrentDictionary<string, (Dictionary<string, MetricRow> Map, DateTime At)> _metricsCaches = new();
     private static readonly SemaphoreSlim _metricsLock = new(1, 1);
 
     /// <summary>
@@ -79,39 +79,46 @@ public static class CodexClient
         }
     }
 
+    /// <summary>GET /api/runs/metrics/cards — cached for <see cref="MetricsTtl"/>.</summary>
+    public static Task<Dictionary<string, MetricRow>?> GetCardMetrics() => GetMetricsTable("cards");
+
+    /// <summary>GET /api/runs/metrics/relics — cached for <see cref="MetricsTtl"/>.</summary>
+    public static Task<Dictionary<string, MetricRow>?> GetRelicMetrics() => GetMetricsTable("relics");
+
     /// <summary>
-    /// GET /api/runs/metrics/cards — full card metrics table (tier, elo, pick%, win%).
-    /// Cached for <see cref="MetricsTtl"/>.
+    /// GET /api/runs/metrics/{entity} — full metrics table (tier, elo, pick%, win%).
+    /// Relics rows have no pick_rate/elo — those fields stay null.
     /// </summary>
-    public static async Task<Dictionary<string, MetricRow>?> GetCardMetrics()
+    private static async Task<Dictionary<string, MetricRow>?> GetMetricsTable(string entityType)
     {
-        if (_metricsCache != null && DateTime.UtcNow - _metricsFetchedAt < MetricsTtl)
-            return _metricsCache;
+        _metricsCaches.TryGetValue(entityType, out var hit);
+        if (hit.Map != null && DateTime.UtcNow - hit.At < MetricsTtl)
+            return hit.Map;
 
         await _metricsLock.WaitAsync();
         try
         {
-            if (_metricsCache != null && DateTime.UtcNow - _metricsFetchedAt < MetricsTtl)
-                return _metricsCache;
+            _metricsCaches.TryGetValue(entityType, out hit);
+            if (hit.Map != null && DateTime.UtcNow - hit.At < MetricsTtl)
+                return hit.Map;
 
             var resp = await Http.GetFromJsonAsync<MetricsResponse>(
-                "/api/runs/metrics/cards?bracket=all", JsonOpts);
-            if (resp?.Rows == null) return _metricsCache;
+                $"/api/runs/metrics/{entityType}?bracket=all", JsonOpts);
+            if (resp?.Rows == null) return hit.Map;
 
             var map = new Dictionary<string, MetricRow>(StringComparer.OrdinalIgnoreCase);
             foreach (var row in resp.Rows)
                 if (!string.IsNullOrEmpty(row.Id))
                     map[row.Id] = row;
 
-            _metricsCache = map;
-            _metricsFetchedAt = DateTime.UtcNow;
-            Log.Info($"[DraftAdvisor] metrics cached: {map.Count} cards");
-            return _metricsCache;
+            _metricsCaches[entityType] = (map, DateTime.UtcNow);
+            Log.Info($"[DraftAdvisor] metrics cached: {map.Count} {entityType}");
+            return map;
         }
         catch (Exception ex)
         {
-            Log.Error($"[DraftAdvisor] metrics failed: {ex.Message}");
-            return _metricsCache;
+            Log.Error($"[DraftAdvisor] metrics({entityType}) failed: {ex.Message}");
+            return hit.Map;
         }
         finally
         {
@@ -120,19 +127,19 @@ public static class CodexClient
     }
 
     /// <summary>
-    /// GET /api/pairings/cards/{id} — partners seen in the same runs.
-    /// Used to explain "held cards that make this offer attractive".
+    /// GET /api/pairings/relics/{id} — cards most associated with this relic.
+    /// partners.cards ∩ the player's deck explains "which held cards want this relic".
     /// </summary>
-    public static async Task<JsonDocument?> GetPairings(string cardId)
+    public static async Task<PairingsResponse?> GetRelicPairings(string relicId)
     {
         try
         {
-            using var stream = await Http.GetStreamAsync($"/api/pairings/cards/{cardId}");
-            return await JsonDocument.ParseAsync(stream);
+            return await Http.GetFromJsonAsync<PairingsResponse>(
+                $"/api/pairings/relics/{relicId}", JsonOpts);
         }
         catch (Exception ex)
         {
-            Log.Error($"[DraftAdvisor] pairings({cardId}) failed: {ex.Message}");
+            Log.Error($"[DraftAdvisor] pairings({relicId}) failed: {ex.Message}");
             return null;
         }
     }

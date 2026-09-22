@@ -13,13 +13,20 @@ Card-pick assistant for **Slay the Spire 2**. Whenever a card reward /
 - **Deck archetype** — nearest community archetype for your current deck
   (`/api/runs/pick-coach`, e.g. "Iron Wave + Shrug It Off")
 
+Offered **relics** get the same overlay treatment: `Score` (0–100
+general rating) + `Tier · Win%` from `/api/runs/metrics/relics`, and a
+`pairs:` line naming the held cards that pair best with the relic
+(`/api/pairings/relics/{id}` intersected with your deck).
+
 No manual input needed: the mod reads your deck, relics and the offered
 cards straight from the running game.
 
-## Screens covered (v1)
+## Screens covered
 
 - Post-combat card reward screen (`NCardRewardSelectionScreen`)
 - "Choose a card" screens (`NChooseACardSelectionScreen`)
+- "Choose a relic" screens (`NChooseARelicSelection`)
+- Merchant shop (`NMerchantInventory`) — badges under each card/relic for sale
 
 ## Install
 
@@ -60,8 +67,9 @@ dotnet build -c Release -p:Sts2DataDir="C:/Program Files (x86)/Steam/steamapps/c
 - `[ModInitializer]` entry point applies Harmony patches.
 - Postfix patches on `AfterOverlayOpened` / `RefreshOptions` /
   `AfterOverlayClosed` of the selection screens drive an `AdviceFlow`.
-- Offered cards are found by scanning the screen for `NCardHolder` /
-  `NCard` nodes (identity via `CardModel.Id.Entry`, e.g. `SHRUG_IT_OFF`).
+- Offered items are found by scanning the screen for `NCardHolder` /
+  `NCard` (cards) and `NRelic` / `NRelicBasicHolder` (relics) nodes
+  (identity via `Model.Id.Entry`, e.g. `SHRUG_IT_OFF`).
 - Deck and relics come from `NRun._state` → `RunState` → `Player.Deck`
   (same access path other StS2 mods use).
 - API calls run off the UI thread; results render via `CallDeferred`.
@@ -76,6 +84,6 @@ community — treat them as reference, not gospel.
 ## Notes / limitations
 
 - Co-op: uses the local player's deck (falls back to `Players[0]`).
-- Merchant shop cards are not covered yet.
+- Potion slots in the shop are not annotated.
 - Requires internet on first reward screen (metrics table is cached
   for 30 min afterwards).
