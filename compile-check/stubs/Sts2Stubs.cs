@@ -58,6 +58,43 @@ namespace MegaCrit.Sts2.Core.Models
     }
 }
 
+namespace MegaCrit.Sts2.Core.Localization
+{
+    public class LocString
+    {
+        public string LocEntryKey { get; set; } = "";
+    }
+}
+
+namespace MegaCrit.Sts2.Core.Events
+{
+    using MegaCrit.Sts2.Core.Localization;
+    using MegaCrit.Sts2.Core.Models;
+
+    public class EventOption
+    {
+        public RelicModel? Relic { get; set; }
+        public LocString? Description { get; set; }
+        public LocString? Title { get; set; }
+    }
+}
+
+namespace MegaCrit.Sts2.Core.Nodes.Events
+{
+    using MegaCrit.Sts2.Core.Events;
+
+    public class NEventOptionButton : Control
+    {
+        public EventOption? Option { get; set; }
+    }
+
+    public class NEventLayout : Control
+    {
+        public void AddOptions(IEnumerable<EventOption> options) { }
+        public override void _ExitTree() { }
+    }
+}
+
 namespace MegaCrit.Sts2.Core.Entities.Cards
 {
     using MegaCrit.Sts2.Core.Models;

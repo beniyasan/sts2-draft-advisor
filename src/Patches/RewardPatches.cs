@@ -1,5 +1,6 @@
 using DraftAdvisor.Advisor;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Nodes.Events;
 using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
@@ -112,4 +113,25 @@ public static class MerchantRelicFillPatch
     [HarmonyPostfix]
     public static void AfterFill()
         => AdviceFlow.OnContentChanged();
+}
+
+/// <summary>
+/// Event screens (Neow and every other event): AddOptions fires each time a
+/// page's option buttons are built; options carrying a relic get badged.
+/// Non-relic options produce no offers, so plain choice events are untouched.
+/// </summary>
+[HarmonyPatch(typeof(NEventLayout), nameof(NEventLayout.AddOptions))]
+public static class EventOptionsAddedPatch
+{
+    [HarmonyPostfix]
+    public static void AfterOptionsAdded(NEventLayout __instance)
+        => AdviceFlow.OnScreenOpened(__instance);
+}
+
+[HarmonyPatch(typeof(NEventLayout), nameof(NEventLayout._ExitTree))]
+public static class EventLayoutClosedPatch
+{
+    [HarmonyPostfix]
+    public static void AfterClosed()
+        => AdviceFlow.OnScreenClosed();
 }

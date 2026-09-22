@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
+using MegaCrit.Sts2.Core.Nodes.Events;
 using MegaCrit.Sts2.Core.Nodes.Relics;
 
 namespace DraftAdvisor.Advisor;
@@ -19,6 +20,10 @@ public sealed class OfferAdvice
     public required Control Node;
     public required string DisplayName;
     public bool IsRelic;
+    /// <summary>Relic offered through an event option button (Neow etc.).</summary>
+    public bool IsEventOption;
+    /// <summary>Option is in the ancient's cursed pool (loc key contains CURSED).</summary>
+    public bool IsCursed;
 
     public int? AdviceRank;
     public double? AdviceScore;
@@ -191,6 +196,9 @@ public static class AdviceFlow
                 Node = node,
                 DisplayName = SafeTitle(model) ?? Prettify(id),
                 IsRelic = true,
+                IsEventOption = node is NEventOptionButton,
+                IsCursed = node is NEventOptionButton b &&
+                    (b.Option?.Description?.LocEntryKey?.Contains("CURSED") ?? false),
             });
         }
         return offers;
@@ -239,6 +247,13 @@ public static class AdviceFlow
         foreach (var child in parent.GetChildren())
         {
             if (child == null) continue;
+            // Event option buttons (Neow, shrine relics...): badge the button,
+            // don't recurse — the relic icon child would be scanned twice.
+            if (child is NEventOptionButton optionButton && optionButton.Option?.Relic != null)
+            {
+                relics.Add((optionButton, optionButton.Option.Relic));
+                continue;
+            }
             if (child is NCardHolder holder && holder.CardModel != null)
             {
                 cards.Add((holder, holder.CardModel));
@@ -339,6 +354,16 @@ public static class AdviceFlow
                     offer.Metrics = m;
                 offer.PairNames = pairNames;
             }
+        }
+
+        // Rank relic offers against each other by score so "which of these" is
+        // visible on Neow and other multi-relic choice screens.
+        var rank = 0;
+        foreach (var o in offers.Where(o => o.IsRelic)
+            .OrderByDescending(o => o.Metrics?.Score ?? -1))
+        {
+            if (o.Metrics == null) continue;
+            o.AdviceRank = ++rank;
         }
     }
 }
