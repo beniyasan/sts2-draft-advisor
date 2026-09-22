@@ -92,9 +92,9 @@ public static class AdvisorUi
             var gsX = offer.Node.GetGlobalTransform().X.Length();
             var bw = offer.IsEventOption
                 ? 300f
-                : offer.Node.GetRect().Size.X < 20f
+                : offer.Node.Size.X < 20f
                     ? 240f
-                    : Mathf.Clamp(offer.Node.GetRect().Size.X * gsX * (offer.IsRelic ? 2f : 1f), 150f, 320f);
+                    : Mathf.Clamp(offer.Node.Size.X * gsX * (offer.IsRelic ? 2f : 1f), 150f, 320f);
             var root = new AnchoredBadge
             {
                 Name = "DraftAdvisorBadge",

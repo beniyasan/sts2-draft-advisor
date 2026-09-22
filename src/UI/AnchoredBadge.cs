@@ -29,7 +29,7 @@ public sealed class AnchoredBadge : Control
             return;
         }
 
-        var rect = Target.GetRect();
+        var rect = new Rect2(Vector2.Zero, Target.Size);
         if (rect.Size.X < 20f || rect.Size.Y < 20f)
         {
             _degenerateSeconds += delta;
