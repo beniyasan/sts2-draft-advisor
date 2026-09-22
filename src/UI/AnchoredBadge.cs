@@ -16,6 +16,7 @@ public sealed class AnchoredBadge : Control
     public float BadgeWidth = 240f;
 
     private bool _measured;
+    private bool _usingFallback;
     private double _degenerateSeconds;
 
     public override void _Process(double delta)
@@ -42,10 +43,18 @@ public sealed class AnchoredBadge : Control
             rect = EventOption
                 ? new Rect2(gp - new Vector2(400f, 0f), new Vector2(400f, 80f))
                 : new Rect2(gp - new Vector2(120f, 210f), new Vector2(240f, 420f));
+            _usingFallback = true;
         }
         else
         {
             _degenerateSeconds = 0;
+            // A real rect arrived after a fallback measurement — remeasure so
+            // child widths track the item's true size.
+            if (_usingFallback)
+            {
+                _usingFallback = false;
+                _measured = false;
+            }
         }
 
         Visible = true;
