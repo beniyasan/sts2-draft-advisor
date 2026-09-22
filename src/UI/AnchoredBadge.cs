@@ -5,8 +5,8 @@ namespace DraftAdvisor.UI;
 /// <summary>
 /// Badge root that re-anchors to its offer node's global rect every frame, so
 /// hover/fan-in animations never leave the advice floating away from the card.
-/// Hidden while the target's rect is degenerate (not laid out yet); gives up
-/// after ~1.5s and falls back to the node's origin.
+/// Hidden while the target's rect is degenerate (not laid out yet); after 1.5s
+/// gives up and anchors to a nominal card/option-sized rect instead.
 /// </summary>
 public sealed class AnchoredBadge : Control
 {
@@ -16,7 +16,7 @@ public sealed class AnchoredBadge : Control
     public float BadgeWidth = 240f;
 
     private bool _measured;
-    private int _degenerateTicks;
+    private double _degenerateSeconds;
 
     public override void _Process(double delta)
     {
@@ -29,16 +29,23 @@ public sealed class AnchoredBadge : Control
         var rect = Target.GetGlobalRect();
         if (rect.Size.X < 20f || rect.Size.Y < 20f)
         {
-            if (++_degenerateTicks > 90)
-            {
-                Visible = true;
-                GlobalPosition = Target.GlobalPosition;
-            }
-            else
+            _degenerateSeconds += delta;
+            if (_degenerateSeconds <= 1.5)
             {
                 Visible = false;
+                return;
             }
-            return;
+            // Give up waiting for layout: fall back to a nominal rect so the
+            // normal anchor math below still lands the badge near the offer
+            // instead of covering it.
+            var gp = Target.GlobalPosition;
+            rect = EventOption
+                ? new Rect2(gp - new Vector2(400f, 0f), new Vector2(400f, 80f))
+                : new Rect2(gp - new Vector2(120f, 210f), new Vector2(240f, 420f));
+        }
+        else
+        {
+            _degenerateSeconds = 0;
         }
 
         Visible = true;
