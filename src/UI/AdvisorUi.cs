@@ -86,37 +86,30 @@ public static class AdvisorUi
     {
         try
         {
-            var root = new Control { Name = "DraftAdvisorBadge", MouseFilter = Control.MouseFilterEnum.Ignore };
-
-            // Geometry comes from the node's ACTUAL on-screen rect, so shop
-            // scaling, reward screens and event buttons all place correctly.
-            // Fallback: not-yet-laid-out nodes get a 240px badge at their origin.
+            // AnchoredBadge re-anchors to the offer's real screen rect every
+            // frame; children are positioned relative to the anchor point.
             var rect = offer.Node.GetGlobalRect();
-            if (rect.Size.X < 20f || rect.Size.Y < 20f)
+            var bw = offer.IsEventOption
+                ? 300f
+                : rect.Size.X < 20f
+                    ? 240f
+                    : Mathf.Clamp(rect.Size.X * (offer.IsRelic ? 2f : 1f), 150f, 320f);
+            var root = new AnchoredBadge
             {
-                rect = new Rect2(
-                    offer.Node.GlobalPosition - new Vector2(120f, 0f),
-                    new Vector2(240f, 80f));
-            }
+                Name = "DraftAdvisorBadge",
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+                Target = offer.Node,
+                EventOption = offer.IsEventOption,
+                IsRelic = offer.IsRelic,
+                BadgeWidth = bw,
+            };
 
-            float bx, by, bw;
-            if (offer.IsEventOption)
-            {
-                // Wide option row: dock a fixed badge at its right edge.
-                bw = 300f;
-                bx = rect.End.X - bw - 10f;
-                by = rect.Position.Y + 8f;
-            }
-            else
-            {
-                // Centered under the item; width tracks the item's real width.
-                bw = Mathf.Clamp(rect.Size.X * (offer.IsRelic ? 2f : 1f), 150f, 320f);
-                bx = rect.Position.X + rect.Size.X / 2f - bw / 2f;
-                by = rect.End.Y + 4f;
-            }
-            var (x1, y1, w1) = (bx, by, bw);
-            var (x2, y2, w2) = (bx, by + 18f, bw);
-            var (x3, y3, w3) = (bx, by + 34f, bw);
+            // Event options anchor at the button's right edge (children extend
+            // left); cards/relics anchor at the bottom-center (centered text).
+            var lx = offer.IsEventOption ? -bw : -bw / 2f;
+            var (x1, y1, w1) = (lx, 0f, bw);
+            var (x2, y2, w2) = (lx, 18f, bw);
+            var (x3, y3, w3) = (lx, 34f, bw);
 
             // --- Rank / context score line ---
             var line1 = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
