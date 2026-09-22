@@ -36,8 +36,8 @@ public static class AdvisorUi
         string? archetypeName,
         double archetypeSimilarity)
     {
-        // One CanvasLayer carries every badge in true screen (viewport) coords,
-        // so card/relic scale and parent transforms can't skew badge placement.
+        // Badges are children of their offer nodes (auto-follow + auto-free);
+        // the archetype chip sits on a CanvasLayer in viewport coords.
         var tree = screen.GetTree();
         if (tree == null) return;
         var layer = new CanvasLayer { Name = "DraftAdvisorOverlay" };
@@ -50,7 +50,8 @@ public static class AdvisorUi
             var badge = BuildOfferBadge(offer, heldNames);
             if (badge != null)
             {
-                layer.AddChild(badge);
+                offer.Node.AddChild(badge);
+                _nodes.Add(badge);
             }
         }
 
@@ -86,14 +87,14 @@ public static class AdvisorUi
     {
         try
         {
-            // AnchoredBadge re-anchors to the offer's real screen rect every
-            // frame; children are positioned relative to the anchor point.
-            var rect = offer.Node.GetGlobalRect();
+            // AnchoredBadge re-anchors inside the offer node's local space;
+            // children are authored in screen px, counter-scaled at runtime.
+            var gsX = offer.Node.GetGlobalTransform().X.Length();
             var bw = offer.IsEventOption
                 ? 300f
-                : rect.Size.X < 20f
+                : offer.Node.GetRect().Size.X < 20f
                     ? 240f
-                    : Mathf.Clamp(rect.Size.X * (offer.IsRelic ? 2f : 1f), 150f, 320f);
+                    : Mathf.Clamp(offer.Node.GetRect().Size.X * gsX * (offer.IsRelic ? 2f : 1f), 150f, 320f);
             var root = new AnchoredBadge
             {
                 Name = "DraftAdvisorBadge",

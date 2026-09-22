@@ -3,8 +3,10 @@ using Godot;
 namespace DraftAdvisor.UI;
 
 /// <summary>
-/// Badge root that re-anchors to its offer node's global rect every frame, so
-/// hover/fan-in animations never leave the advice floating away from the card.
+/// Badge root attached as a child of its offer node, so node transforms and
+/// hover/fan-in animations carry it automatically. _Process keeps it anchored
+/// to the node's local rect (bottom-center under cards/relics, right edge of
+/// event option buttons) and counter-scales so label text stays screen-size.
 /// Hidden while the target's rect is degenerate (not laid out yet); after 1.5s
 /// gives up and anchors to a nominal card/option-sized rect instead.
 /// </summary>
@@ -27,7 +29,7 @@ public sealed class AnchoredBadge : Control
             return;
         }
 
-        var rect = Target.GetGlobalRect();
+        var rect = Target.GetRect();
         if (rect.Size.X < 20f || rect.Size.Y < 20f)
         {
             _degenerateSeconds += delta;
@@ -36,13 +38,11 @@ public sealed class AnchoredBadge : Control
                 Visible = false;
                 return;
             }
-            // Give up waiting for layout: fall back to a nominal rect so the
-            // normal anchor math below still lands the badge near the offer
-            // instead of covering it.
-            var gp = Target.GlobalPosition;
+            // Give up waiting for layout: nominal rect in the node's local
+            // space so the anchor math still lands the badge near the offer.
             rect = EventOption
-                ? new Rect2(gp - new Vector2(400f, 0f), new Vector2(400f, 80f))
-                : new Rect2(gp - new Vector2(120f, 210f), new Vector2(240f, 420f));
+                ? new Rect2(new Vector2(-400f, 0f), new Vector2(400f, 80f))
+                : new Rect2(new Vector2(-120f, -210f), new Vector2(240f, 420f));
             _usingFallback = true;
         }
         else
@@ -58,12 +58,21 @@ public sealed class AnchoredBadge : Control
         }
 
         Visible = true;
+
+        // Children are authored in screen px; undo the target's global scale.
+        var gt = Target.GetGlobalTransform();
+        var gsX = gt.X.Length();
+        var gsY = gt.Y.Length();
+        var sx = gsX > 0.01f ? 1f / gsX : 1f;
+        var sy = gsY > 0.01f ? 1f / gsY : 1f;
+        Scale = new Vector2(sx, sy);
+
         if (!_measured)
         {
             _measured = true;
             BadgeWidth = EventOption
                 ? 300f
-                : Mathf.Clamp(rect.Size.X * (IsRelic ? 2f : 1f), 150f, 320f);
+                : Mathf.Clamp(rect.Size.X * gsX * (IsRelic ? 2f : 1f), 150f, 320f);
             var lx = EventOption ? -BadgeWidth : -BadgeWidth / 2f;
             var i = 0;
             foreach (var child in GetChildren())
@@ -75,8 +84,10 @@ public sealed class AnchoredBadge : Control
             }
         }
 
-        GlobalPosition = EventOption
-            ? new Vector2(rect.End.X - 10f, rect.Position.Y + 8f)
-            : new Vector2(rect.Position.X + rect.Size.X / 2f, rect.End.Y + 4f);
+        // Anchor in the TARGET's local space (badge is its child): bottom-center
+        // under the item, or just inside the option button's right edge.
+        Position = EventOption
+            ? rect.Position + new Vector2(rect.Size.X - 10f * sx, 8f * sy)
+            : rect.Position + new Vector2(rect.Size.X / 2f, rect.Size.Y + 4f * sy);
     }
 }
