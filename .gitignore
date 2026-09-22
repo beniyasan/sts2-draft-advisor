@@ -1,0 +1,8 @@
+# Game DLLs — never commit, they are MegaCrit's assets. Drop them in ./lib locally.
+lib/
+*.dll
+
+bin/
+obj/
+build/
+.env

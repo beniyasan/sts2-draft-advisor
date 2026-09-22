@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>DraftAdvisor</AssemblyName>
+    <RootNamespace>DraftAdvisor</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="stubs/**/*.cs" />
+    <Compile Include="../src/**/*.cs" />
+    <PackageReference Include="Lib.Harmony" Version="2.4.1" />
+    <PackageReference Include="GodotSharp" Version="4.5.1" />
+  </ItemGroup>
+</Project>

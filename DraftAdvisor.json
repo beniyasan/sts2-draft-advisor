@@ -1,0 +1,11 @@
+{
+  "id": "DraftAdvisor",
+  "name": "Draft Advisor",
+  "author": "beniyasan",
+  "description": "Card pick assistant: overlays community pick-rate, win-rate and deck-fit advice from spire-codex.com on card reward screens.",
+  "version": "0.1.0",
+  "has_pck": false,
+  "has_dll": true,
+  "dependencies": [],
+  "affects_gameplay": false
+}
