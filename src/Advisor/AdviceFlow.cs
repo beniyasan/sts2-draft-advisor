@@ -146,12 +146,17 @@ public static class AdviceFlow
         var relics = new List<(Control node, RelicModel model)>();
         FindOffersInTree(screen, cards, relics, 0);
 
+        // Dedupe by node, not by id: the same card id can legitimately appear
+        // in multiple slots (e.g. two copies for sale) and each needs a badge.
+        // Holder/inner-child double-counting is prevented by FindOffersInTree
+        // not recursing into matched holders.
         var offers = new List<OfferAdvice>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<Control>();
         foreach (var (node, model) in cards)
         {
+            if (!seen.Add(node)) continue;
             var id = RunInspector.NormalizeId(SafeEntry(model));
-            if (string.IsNullOrEmpty(id) || !seen.Add($"c:{id}")) continue;
+            if (string.IsNullOrEmpty(id)) continue;
             offers.Add(new OfferAdvice
             {
                 Id = id,
@@ -161,8 +166,9 @@ public static class AdviceFlow
         }
         foreach (var (node, model) in relics)
         {
+            if (!seen.Add(node)) continue;
             var id = RunInspector.NormalizeId(SafeEntry(model));
-            if (string.IsNullOrEmpty(id) || !seen.Add($"r:{id}")) continue;
+            if (string.IsNullOrEmpty(id)) continue;
             offers.Add(new OfferAdvice
             {
                 Id = id,
@@ -227,15 +233,16 @@ public static class AdviceFlow
                 cards.Add((card, card.Model));
                 continue;
             }
-            // NRelicBasicHolder wraps an NRelic child — match either, dedupe by id later.
-            if (child is NRelic relic && relic.Model != null)
-            {
-                relics.Add((relic, relic.Model));
-                continue;
-            }
+            // NRelicBasicHolder wraps an NRelic child: prefer the holder (better
+            // anchor) and do NOT recurse into it, else the same relic is scanned twice.
             if (child is NRelicBasicHolder relicHolder && relicHolder.Relic?.Model != null)
             {
                 relics.Add((relicHolder, relicHolder.Relic.Model));
+                continue;
+            }
+            if (child is NRelic relic && relic.Model != null)
+            {
+                relics.Add((relic, relic.Model));
                 continue;
             }
             FindOffersInTree(child, cards, relics, depth + 1);

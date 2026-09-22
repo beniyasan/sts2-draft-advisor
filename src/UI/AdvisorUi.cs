@@ -82,6 +82,12 @@ public static class AdvisorUi
         {
             var root = new Control { Name = "DraftAdvisorBadge", MouseFilter = Control.MouseFilterEnum.Ignore };
 
+            // Badge geometry: cards are ~300x420 (center origin → y+218 is below);
+            // relic icons are ~90px (center origin → y+60 is below).
+            var (x1, y1, w1) = offer.IsRelic ? (-110f, 60f, 220f) : (-140f, 218f, 280f);
+            var (x2, y2, w2) = offer.IsRelic ? (-110f, 78f, 220f) : (-140f, 240f, 280f);
+            var (x3, y3, w3) = offer.IsRelic ? (-110f, 94f, 240f) : (-160f, 258f, 320f);
+
             // --- Rank / context score line ---
             var line1 = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
             var rankTxt = offer.AdviceRank is int r && r <= RankColors.Length
@@ -102,8 +108,8 @@ public static class AdvisorUi
             line1.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
             line1.AddThemeConstantOverride("outline_size", 6);
             line1.HorizontalAlignment = HorizontalAlignment.Center;
-            line1.Position = new Vector2(-140, 218);
-            line1.Size = new Vector2(280, 22);
+            line1.Position = new Vector2(x1, y1);
+            line1.Size = new Vector2(w1, 22);
             root.AddChild(line1);
 
             // --- Metrics line: tier · pick% · win% ---
@@ -126,8 +132,8 @@ public static class AdvisorUi
             line2.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
             line2.AddThemeConstantOverride("outline_size", 5);
             line2.HorizontalAlignment = HorizontalAlignment.Center;
-            line2.Position = new Vector2(-140, 240);
-            line2.Size = new Vector2(280, 18);
+            line2.Position = new Vector2(x2, y2);
+            line2.Size = new Vector2(w2, 18);
             root.AddChild(line2);
 
             // --- Reason line: held items driving this pick ---
@@ -141,8 +147,8 @@ public static class AdvisorUi
                 line3.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
                 line3.AddThemeConstantOverride("outline_size", 4);
                 line3.HorizontalAlignment = HorizontalAlignment.Center;
-                line3.Position = new Vector2(-160, 258);
-                line3.Size = new Vector2(320, 16);
+                line3.Position = new Vector2(x3, y3);
+                line3.Size = new Vector2(w3, 16);
                 root.AddChild(line3);
             }
 

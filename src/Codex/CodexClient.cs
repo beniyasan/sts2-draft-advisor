@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Json;
 using System.Text.Json;
 using MegaCrit.Sts2.Core.Logging;
@@ -31,7 +32,7 @@ public static class CodexClient
         PropertyNameCaseInsensitive = true,
     };
 
-    private static readonly Dictionary<string, (Dictionary<string, MetricRow> Map, DateTime At)> _metricsCaches = new();
+    private static readonly ConcurrentDictionary<string, (Dictionary<string, MetricRow> Map, DateTime At)> _metricsCaches = new();
     private static readonly SemaphoreSlim _metricsLock = new(1, 1);
 
     /// <summary>
