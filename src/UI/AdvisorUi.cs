@@ -36,14 +36,21 @@ public static class AdvisorUi
         string? archetypeName,
         double archetypeSimilarity)
     {
+        // One CanvasLayer carries every badge in true screen (viewport) coords,
+        // so card/relic scale and parent transforms can't skew badge placement.
+        var tree = screen.GetTree();
+        if (tree == null) return;
+        var layer = new CanvasLayer { Name = "DraftAdvisorOverlay" };
+        tree.Root.AddChild(layer);
+        _nodes.Add(layer);
+
         foreach (var offer in offers)
         {
             if (!GodotObject.IsInstanceValid(offer.Node)) continue;
             var badge = BuildOfferBadge(offer, heldNames);
             if (badge != null)
             {
-                offer.Node.AddChild(badge);
-                _nodes.Add(badge);
+                layer.AddChild(badge);
             }
         }
 
@@ -52,8 +59,7 @@ public static class AdvisorUi
             var chip = BuildArchetypeChip(ctrl, archetypeName, archetypeSimilarity);
             if (chip != null)
             {
-                screen.AddChild(chip);
-                _nodes.Add(chip);
+                layer.AddChild(chip);
             }
         }
     }
@@ -72,8 +78,8 @@ public static class AdvisorUi
     }
 
     /// <summary>
-    /// Badge under each offered card.
-    /// NGridCardHolder origin is the card CENTER; card visual spans roughly ±150 x, ±211 y.
+    /// Badge anchored to the offer node's real screen rect (GetGlobalRect):
+    /// centered under cards/relics, docked at the right edge of event buttons.
     /// </summary>
     private static Control? BuildOfferBadge(
         OfferAdvice offer, IReadOnlyDictionary<string, string> heldNames)
@@ -82,24 +88,35 @@ public static class AdvisorUi
         {
             var root = new Control { Name = "DraftAdvisorBadge", MouseFilter = Control.MouseFilterEnum.Ignore };
 
-            // Badge geometry: cards are ~300x420 (center origin → y+218 is below);
-            // relic icons ~90px (center origin → y+60 below); event option buttons
-            // are wide rows — badge docks to the button's right edge instead.
-            float x1, y1, w1, x2, y2, w2, x3, y3, w3;
+            // Geometry comes from the node's ACTUAL on-screen rect, so shop
+            // scaling, reward screens and event buttons all place correctly.
+            // Fallback: not-yet-laid-out nodes get a 240px badge at their origin.
+            var rect = offer.Node.GetGlobalRect();
+            if (rect.Size.X < 20f || rect.Size.Y < 20f)
+            {
+                rect = new Rect2(
+                    offer.Node.GlobalPosition - new Vector2(120f, 0f),
+                    new Vector2(240f, 80f));
+            }
+
+            float bx, by, bw;
             if (offer.IsEventOption)
             {
-                var bw = offer.Node.Size.X;
-                var bx = Mathf.Max(0f, bw > 320f ? bw - 310f : 60f);
-                (x1, y1, w1) = (bx, 10f, 300f);
-                (x2, y2, w2) = (bx, 28f, 300f);
-                (x3, y3, w3) = (bx, 44f, 300f);
+                // Wide option row: dock a fixed badge at its right edge.
+                bw = 300f;
+                bx = rect.End.X - bw - 10f;
+                by = rect.Position.Y + 8f;
             }
             else
             {
-                (x1, y1, w1) = offer.IsRelic ? (-110f, 60f, 220f) : (-140f, 218f, 280f);
-                (x2, y2, w2) = offer.IsRelic ? (-110f, 78f, 220f) : (-140f, 240f, 280f);
-                (x3, y3, w3) = offer.IsRelic ? (-110f, 94f, 240f) : (-160f, 258f, 320f);
+                // Centered under the item; width tracks the item's real width.
+                bw = Mathf.Clamp(rect.Size.X * (offer.IsRelic ? 2f : 1f), 150f, 320f);
+                bx = rect.Position.X + rect.Size.X / 2f - bw / 2f;
+                by = rect.End.Y + 4f;
             }
+            var (x1, y1, w1) = (bx, by, bw);
+            var (x2, y2, w2) = (bx, by + 18f, bw);
+            var (x3, y3, w3) = (bx, by + 34f, bw);
 
             // --- Rank / context score line ---
             var line1 = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
