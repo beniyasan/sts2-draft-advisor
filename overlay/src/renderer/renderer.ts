@@ -20,6 +20,9 @@ window.draftAdvisor.onChatDone(() => { state.busy = false; state.streaming = fal
 window.draftAdvisor.onStatus(update => { Object.assign(state, update); render(); });
 document.getElementById("form")!.addEventListener("submit", async event => { event.preventDefault(); const question = input.value.trim(); if (!question || state.busy) return; input.value = ""; state.messages.push({ role: "user", text: question }); state.busy = true; state.error = null; state.streaming = false; render(); try { await window.draftAdvisor.ask(question); } catch (error) { state.busy = false; state.streaming = false; state.messages.push({ role: "system", text: String(error) }); render(); } });
 document.getElementById("refresh")!.addEventListener("click", () => void window.draftAdvisor.refreshState());
-document.getElementById("login")!.addEventListener("click", () => void window.draftAdvisor.login());
+document.getElementById("login")!.addEventListener("click", async () => {
+  try { await window.draftAdvisor.login(); }
+  catch (error) { state.error = String(error instanceof Error ? error.message : error); render(); }
+});
 document.getElementById("close")!.addEventListener("click", () => void window.draftAdvisor.minimize());
 render();

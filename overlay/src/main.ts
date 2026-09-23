@@ -36,6 +36,7 @@ let latestState: GameState | null = null;
 
 class PipeClient extends EventEmitter {
   private socket: Socket | null = null; private buffer = ""; private stopped = false; private reconnecting = false;
+  private loggedFailure = false;
   start(): void { this.stopped = false; this.connect(); }
   stop(): void { this.stopped = true; this.socket?.destroy(); this.socket = null; }
   requestState(): void { this.send({ type: "request_state" }); }
@@ -43,8 +44,19 @@ class PipeClient extends EventEmitter {
     if (this.stopped) return;
     const socket = createConnection(pipePath); this.socket = socket; socket.setEncoding("utf8");
     socket.on("data", (chunk: string) => this.read(chunk));
-    socket.on("connect", () => { this.reconnecting = false; this.emit("connection", true); });
-    socket.on("error", () => this.reconnect()); socket.on("close", () => this.reconnect());
+    socket.on("connect", () => {
+      this.reconnecting = false; this.loggedFailure = false;
+      log("pipe connected");
+      this.emit("connection", true);
+      // Ask the MOD for its latest state so a mid-run reconnect shows data
+      // without waiting for the next screen event.
+      this.requestState();
+    });
+    socket.on("error", (error: NodeJS.ErrnoException) => {
+      if (!this.loggedFailure) { this.loggedFailure = true; log(`pipe connect failed: ${error.code ?? error.message} (retrying every 1s)`); }
+      this.reconnect();
+    });
+    socket.on("close", () => this.reconnect());
   }
   private read(chunk: string): void {
     this.buffer += chunk; let end = this.buffer.indexOf("\n");
@@ -53,7 +65,7 @@ class PipeClient extends EventEmitter {
       if (line) {
         try {
           const value = JSON.parse(line);
-          if (value.type === "game_state") this.emit("state", value as GameState);
+          if (value.type === "game_state") { log(`game_state: ${(value as GameState).screen?.kind ?? "?"}`); this.emit("state", value as GameState); }
           else if (value.type === "toggle_window") this.emit("toggle");
         } catch { }
       }

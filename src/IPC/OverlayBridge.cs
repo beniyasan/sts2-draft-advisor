@@ -126,8 +126,10 @@ public static class OverlayBridge
                     _writer = new StreamWriter(server, new UTF8Encoding(false), 1024, leaveOpen: true)
                     { AutoFlush = true };
                 }
+                Log.Info("[DraftAdvisor] overlay connected");
                 KickFlush();
                 await ReadClientAsync(server).ConfigureAwait(false);
+                Log.Info("[DraftAdvisor] overlay disconnected");
             }
             catch (Exception ex)
             {

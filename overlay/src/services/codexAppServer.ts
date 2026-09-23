@@ -86,6 +86,9 @@ export class CodexAppServerClient {
         this.spawnServer(command, true);
         return;
       }
+      // Drop the failed child so the next call retries a fresh spawn instead of
+      // failing forever on a dead process.
+      if (this.process === child) this.process = null;
       this.failAll(new Error(`codex の起動に失敗しました: ${error.message}`));
     });
     child.on("exit", () => {
