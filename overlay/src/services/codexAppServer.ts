@@ -78,31 +78,39 @@ export class CodexAppServerClient {
   }
   private async ensureProcess(): Promise<void> {
     if (this.process && !this.process.killed) return;
-    this.spawnServer(process.env.CODEX_BIN ?? "codex", false);
+    // Wait for the "spawn" event before sending initialize — otherwise a failed
+    // first spawn (ENOENT on Windows .cmd shims) would swallow the request.
+    await this.spawnServer(process.env.CODEX_BIN ?? "codex", false);
     await this.request("initialize", { clientInfo: { name: "sts2_draft_advisor", title: "STS2 Draft Advisor", version: "0.1.0" } });
     this.send({ method: "initialized", params: {} });
   }
-  private spawnServer(command: string, useShell: boolean): void {
+  private spawnServer(command: string, useShell: boolean): Promise<void> {
     const child = spawn(command, ["app-server"], { stdio: ["pipe", "pipe", "pipe"], shell: useShell });
-    this.process = child;
     child.stdout.setEncoding("utf8"); child.stdout.on("data", (chunk: string) => this.read(chunk));
     child.stderr.setEncoding("utf8"); child.stderr.on("data", (chunk: string) => this.hooks.onStatus({ log: chunk.trim() }));
-    // Without an "error" listener a missing codex binary would crash the app.
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      // npm-installed CLIs on Windows are .cmd shims that need a shell to spawn.
-      if (error.code === "ENOENT" && !useShell && process.platform === "win32" && !process.env.CODEX_BIN) {
-        this.spawnServer(command, true);
-        return;
-      }
-      // Drop the failed child so the next call retries a fresh spawn instead of
-      // failing forever on a dead process.
-      if (this.process === child) this.process = null;
-      this.failAll(new Error(`codex の起動に失敗しました: ${error.message}`));
-    });
-    child.on("exit", () => {
-      if (this.process !== child) return;
-      this.process = null; this.threadId = null; this.model = null; this.effort = null;
-      this.failAll(new Error("Codex App Serverが終了しました。"));
+    return new Promise((resolve, reject) => {
+      child.once("error", (error: NodeJS.ErrnoException) => {
+        // npm-installed CLIs on Windows are .cmd shims that need a shell to spawn.
+        if (!useShell && process.platform === "win32" && !process.env.CODEX_BIN) {
+          this.spawnServer(command, true).then(resolve, reject);
+          return;
+        }
+        reject(new Error(`codex の起動に失敗しました: ${error.message}`));
+      });
+      child.once("spawn", () => {
+        this.process = child;
+        // Runtime errors after a successful spawn.
+        child.on("error", (error: Error) => {
+          if (this.process === child) this.process = null;
+          this.failAll(new Error(`codex の起動に失敗しました: ${error.message}`));
+        });
+        child.on("exit", () => {
+          if (this.process !== child) return;
+          this.process = null; this.threadId = null; this.model = null; this.effort = null;
+          this.failAll(new Error("Codex App Serverが終了しました。"));
+        });
+        resolve();
+      });
     });
   }
   private failAll(error: Error): void {
