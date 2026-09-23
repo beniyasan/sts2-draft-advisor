@@ -5,7 +5,7 @@ namespace DraftAdvisor.UI;
 /// <summary>
 /// Badge root attached as a child of its offer node, so node transforms and
 /// hover/fan-in animations carry it automatically. _Process keeps it anchored
-/// to the node's local rect (bottom-center under cards/relics, right edge of
+/// to the node's local rect (top edge above cards/relics, right edge of
 /// event option buttons) and counter-scales so label text stays screen-size.
 /// Hidden while the target's rect is degenerate (not laid out yet); after 1.5s
 /// gives up and anchors to a nominal card/option-sized rect instead.
@@ -78,16 +78,19 @@ public sealed class AnchoredBadge : Control
             foreach (var child in GetChildren())
             {
                 if (child is not Control c) continue;
-                c.Position = new Vector2(lx, i == 0 ? 0f : i == 1 ? 18f : 34f);
+                // Non-event badges stack upward from the top-edge anchor.
+                var y = EventOption ? i * 17f : -52f + i * 17f;
+                c.Position = new Vector2(lx, y);
                 c.Size = new Vector2(BadgeWidth, c.Size.Y);
                 i++;
             }
         }
 
-        // Anchor in the TARGET's local space (badge is its child): bottom-center
-        // under the item, or just inside the option button's right edge.
+        // Anchor in the TARGET's local space (badge is its child): centered
+        // just ABOVE the item's top edge, or inside the option button's right
+        // edge. Above keeps the badge off the card art and its type banner.
         Position = EventOption
             ? rect.Position + new Vector2(rect.Size.X - 10f * sx, 8f * sy)
-            : rect.Position + new Vector2(rect.Size.X / 2f, rect.Size.Y + 4f * sy);
+            : rect.Position + new Vector2(rect.Size.X / 2f, -6f * sy);
     }
 }

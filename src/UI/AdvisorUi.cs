@@ -106,11 +106,12 @@ public static class AdvisorUi
             };
 
             // Event options anchor at the button's right edge (children extend
-            // left); cards/relics anchor at the bottom-center (centered text).
+            // left); cards/relics anchor above the top edge, stacking upward
+            // (matches AnchoredBadge's runtime layout pass).
             var lx = offer.IsEventOption ? -bw : -bw / 2f;
-            var (x1, y1, w1) = (lx, 0f, bw);
-            var (x2, y2, w2) = (lx, 18f, bw);
-            var (x3, y3, w3) = (lx, 34f, bw);
+            var (x1, y1, w1) = offer.IsEventOption ? (lx, 0f, bw) : (lx, -52f, bw);
+            var (x2, y2, w2) = offer.IsEventOption ? (lx, 17f, bw) : (lx, -35f, bw);
+            var (x3, y3, w3) = offer.IsEventOption ? (lx, 34f, bw) : (lx, -18f, bw);
 
             // --- Rank / context score line ---
             var line1 = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
