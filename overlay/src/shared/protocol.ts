@@ -10,11 +10,15 @@ export interface RendererState {
   game: GameState | null; messages: ChatMessage[]; busy: boolean; connected: boolean;
   model: string | null; modelOptions: string[]; error: string | null;
 }
+export interface RendererStatus {
+  busy?: boolean; connected?: boolean; model?: string | null; modelOptions?: string[];
+  error?: string | null; authMode?: string; planType?: string; log?: string;
+}
 export interface OverlayApi {
   onState(listener: (state: GameState) => void): () => void;
   onDelta(listener: (delta: string) => void): () => void;
   onChatDone(listener: () => void): () => void;
-  onStatus(listener: (status: Partial<RendererState>) => void): () => void;
+  onStatus(listener: (status: RendererStatus) => void): () => void;
   ask(question: string): Promise<void>; login(): Promise<void>; refreshState(): Promise<void>; minimize(): Promise<void>;
 }
 declare global { interface Window { draftAdvisor: OverlayApi; } }

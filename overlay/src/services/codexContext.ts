@@ -5,8 +5,18 @@ export class CodexContextService {
   private cache = new Map<string, { expires: number; value: unknown }>();
   async buildPrompt(question: string, state: GameState): Promise<string> {
     const relicIds = new Set([...state.player.relics, ...state.screen.offers.filter(offer => offer.isRelic).map(offer => offer.id)]);
-    const ids = [...state.player.deck.map(card => card.id), ...state.player.relics, ...state.screen.offers.map(offer => offer.id)].slice(0, 18);
-    const details = await Promise.all(ids.map(id => this.entity(id, relicIds.has(id))));
+    const offerNames = new Map(state.screen.offers.map(offer => [this.canonicalId(offer.id), offer.displayName]));
+    // Keep the current choices first. A normal deck can exceed the context cap;
+    // dropping an offered card while retaining only the first deck entries made
+    // the assistant report "no data" for the card the player was asking about.
+    const refs: Array<{ id: string; displayName?: string }> = [...state.screen.offers.map(offer => ({ id: offer.id, displayName: offer.displayName })),
+      ...state.player.deck.map(card => ({ id: card.id })),
+      ...state.player.relics.map(id => ({ id }))]
+      .filter((ref, index, all) => all.findIndex(other => this.canonicalId(other.id) === this.canonicalId(ref.id)) === index)
+      .slice(0, 18);
+    const details = await Promise.all(refs.map(ref => this.entity(
+      ref.id, relicIds.has(ref.id), ref.displayName || offerNames.get(this.canonicalId(ref.id))
+    )));
     const search = await this.search(question);
     const offers = state.screen.offers.map(offer => `${offer.id}${offer.displayName ? `(${offer.displayName})` : ""}${offer.isCursed ? "【呪い】" : ""}`);
     return [
@@ -23,9 +33,46 @@ export class CodexContextService {
       `ユーザーの質問: ${question}`,
     ].join("\n");
   }
-  private async entity(id: string, isRelic: boolean): Promise<unknown> {
-    const type = isRelic ? "relics" : "cards"; const slug = id.toLowerCase();
-    return this.fetchCached(`${type}:${slug}`, `${BASE}/api/${type}/${encodeURIComponent(slug)}?lang=jpn`);
+  private async entity(id: string, isRelic: boolean, displayName = ""): Promise<unknown> {
+    const type = isRelic ? "relics" : "cards";
+    const slug = id.trim().toLowerCase();
+    const direct = await this.fetchCached(`${type}:${slug}`, `${BASE}/api/${type}/${encodeURIComponent(slug)}?lang=jpn`);
+    if (!this.isUnavailable(direct)) return direct;
+
+    // Game model IDs are not guaranteed to use the same spelling as Codex IDs
+    // (for example a prefix or an underscore can be present). Offers also carry
+    // a localized title, so use the documented collection search as a fallback.
+    if (displayName && (direct as any)?.status === 404) {
+      const found = await this.lookup(type, displayName);
+      const resolvedId = this.resultId(found, displayName);
+      if (resolvedId) {
+        const resolved = await this.fetchCached(
+          `${type}:${resolvedId.toLowerCase()}`,
+          `${BASE}/api/${type}/${encodeURIComponent(resolvedId.toLowerCase())}?lang=jpn`,
+        );
+        if (!this.isUnavailable(resolved)) return resolved;
+      }
+    }
+    return { unavailable: true, requestedId: id, displayName, status: (direct as any)?.status };
+  }
+  private async lookup(type: string, displayName: string): Promise<unknown> {
+    const url = `${BASE}/api/${type}?search=${encodeURIComponent(displayName.slice(0, 120))}&lang=jpn`;
+    return this.fetchCached(`lookup:${type}:${displayName}`, url);
+  }
+  private resultId(value: unknown, displayName: string): string | null {
+    const rows = Array.isArray(value) ? value : (value as any)?.results ?? (value as any)?.items ?? (value as any)?.data ?? [];
+    if (!Array.isArray(rows)) return null;
+    const exact = rows.find((item: any) => item && typeof item.id === "string" &&
+      [item.name, item.title, item.display_name].some((name: unknown) => name === displayName));
+    const row = exact ?? rows.find((item: any) => item && typeof item.id === "string");
+    return row?.id ?? null;
+  }
+  private isUnavailable(value: unknown): boolean {
+    return !!value && typeof value === "object" && (value as any).unavailable === true;
+  }
+  private canonicalId(id: string): string {
+    const value = id.split(":").pop()?.replace(/^CARD_|^RELIC_/i, "") ?? id;
+    return value.replace(/[^a-z0-9]/gi, "").toUpperCase();
   }
   private async search(question: string): Promise<unknown> {
     if (!/[カードレリック効果説明検索おすすめ]|card|relic|effect|search/i.test(question)) return null;

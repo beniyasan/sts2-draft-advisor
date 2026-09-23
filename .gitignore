@@ -6,6 +6,20 @@ bin/
 obj/
 build/
 .env
+.env.*
+.vs/
+.idea/
+*.user
+*.suo
+*.pdb
+*.log
+*.zip
+*.db
+*.sqlite
+*.sqlite3
+coverage/
+.DS_Store
+Thumbs.db
 
 overlay/node_modules/
 overlay/dist/

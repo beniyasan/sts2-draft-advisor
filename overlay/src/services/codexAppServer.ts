@@ -1,15 +1,19 @@
-import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-
-interface Pending { resolve: (value: any) => void; reject: (error: Error) => void; }
-export interface CodexHooks { onDelta(delta: string): void; onCompleted(): void; onStatus(status: Record<string, unknown>): void; onAuthUrl(url: string): void; }
+import { CodexTransport, CodexTransportHooks, RpcMessage } from "./codexTransport";
 
 interface ModelEntry {
-  id?: string; model?: string; isDefault?: boolean;
-  defaultReasoningEffort?: string;
+  id?: string;
+  model?: string;
+  isDefault?: boolean;
   supportedReasoningEfforts?: Array<{ reasoningEffort?: string }>;
 }
 
-// Fastest efforts first — the overlay wants quick chat answers.
+export interface CodexHooks {
+  onDelta(delta: string): void;
+  onCompleted(): void;
+  onStatus(status: Record<string, unknown>): void;
+  onAuthUrl(url: string): void;
+}
+
 const FAST_EFFORTS = ["none", "minimal", "low"];
 
 function pickEffort(model: ModelEntry | undefined): string | null {
@@ -19,48 +23,86 @@ function pickEffort(model: ModelEntry | undefined): string | null {
   return FAST_EFFORTS.find(effort => supported.includes(effort)) ?? null;
 }
 
+/** Coordinates Codex conversations on top of the independent JSON-RPC transport. */
 export class CodexAppServerClient {
-  private process: ChildProcessWithoutNullStreams | null = null;
-  private nextId = 1; private pending = new Map<number, Pending>(); private buffer = "";
-  private threadId: string | null = null; private model: string | null = null;
-  private effort: string | null = null; private busy = false; private sawDelta = false;
+  private readonly transport: CodexTransport;
+  private threadId: string | null = null;
+  private model: string | null = null;
+  private effort: string | null = null;
+  private busy = false;
+  private sawDelta = false;
+  private initialized = false;
+  private initializing: Promise<void> | null = null;
+  private generation = 0;
   private completion: { resolve: () => void; reject: (error: Error) => void } | null = null;
-  constructor(private readonly hooks: CodexHooks) {}
+
+  constructor(
+    private readonly hooks: CodexHooks,
+    createTransport: (hooks: CodexTransportHooks) => CodexTransport = hooks => new CodexTransport(hooks),
+  ) {
+    this.transport = createTransport({
+      onMessage: message => this.handle(message),
+      onLog: log => this.hooks.onStatus({ log }),
+      onExit: error => this.handleTransportExit(error),
+    });
+  }
 
   async ask(prompt: string): Promise<void> {
-    await this.ensureReady(); if (this.busy) throw new Error("前の相談がまだ処理中です。"); this.busy = true;
+    if (this.busy) throw new Error("前の相談がまだ処理中です。");
+    this.busy = true;
+    const generation = this.generation;
     this.sawDelta = false;
     try {
+      await this.ensureReady();
+      if (generation !== this.generation) throw new Error("Codex App Serverが停止しました。");
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
-          this.completion = null;
-          reject(new Error("Codex の回答がタイムアウトしました。"));
+          completion.reject(new Error("Codex の回答がタイムアウトしました。"));
+          // Discard the old stream so late notifications cannot enter the next answer.
+          this.transport.stop();
         }, 180000);
-        this.completion = {
+        const completion = {
           resolve: () => { clearTimeout(timer); resolve(); },
           reject: (error: Error) => { clearTimeout(timer); reject(error); },
         };
-        this.request("turn/start", { threadId: this.threadId, input: [{ type: "text", text: prompt, text_elements: [] }], model: this.model, effort: this.effort, summary: "concise" })
-          .catch((error: unknown) => {
-            this.completion = null;
-            clearTimeout(timer);
-            reject(error instanceof Error ? error : new Error(String(error)));
-          });
+        this.completion = completion;
+        this.transport.request("turn/start", {
+          threadId: this.threadId,
+          input: [{ type: "text", text: prompt, text_elements: [] }],
+          model: this.model,
+          effort: this.effort,
+          summary: "concise",
+        }).catch(error => {
+          if (this.completion !== completion) return;
+          completion.reject(error instanceof Error ? error : new Error(String(error)));
+          this.transport.stop();
+        });
       });
-    } finally { this.busy = false; this.completion = null; }
+    } finally {
+      this.busy = false;
+      this.completion = null;
+    }
   }
+
   async login(): Promise<void> {
     await this.ensureProcess();
-    const result = await this.request("account/login/start", { type: "chatgpt", useHostedLoginSuccessPage: true, appBrand: "codex" });
+    const result = await this.transport.request("account/login/start", {
+      type: "chatgpt",
+      useHostedLoginSuccessPage: true,
+      appBrand: "codex",
+    }) as { authUrl?: string } | undefined;
     if (result?.authUrl) this.hooks.onAuthUrl(result.authUrl);
   }
-  stop(): void { this.process?.kill(); this.process = null; }
+
+  stop(): void {
+    this.transport.stop();
+  }
 
   private async ensureReady(): Promise<void> {
     await this.ensureProcess();
     if (!this.model) {
-      const result = await this.request("model/list", { limit: 100, includeHidden: false });
-      const models = (result?.data ?? []) as ModelEntry[];
+      const result = await this.transport.request("model/list", { limit: 100, includeHidden: false }) as { data?: ModelEntry[] };
+      const models = result?.data ?? [];
       const ids = models.map(item => item.id ?? item.model).filter((id): id is string => !!id);
       const chosen = models.find(item => (item.id ?? item.model) === "gpt-6-luna")
         ?? models.find(item => item.isDefault)
@@ -71,92 +113,95 @@ export class CodexAppServerClient {
       if (!this.model) throw new Error("利用可能なCodexモデルが見つかりません。");
     }
     if (!this.threadId) {
-      const result = await this.request("thread/start", { model: this.model, serviceName: "sts2_draft_advisor" });
+      const result = await this.transport.request("thread/start", { model: this.model, serviceName: "sts2_draft_advisor" }) as { thread?: { id?: string } };
       this.threadId = result?.thread?.id ?? null;
       if (!this.threadId) throw new Error("Codex会話スレッドを作成できませんでした。");
     }
   }
+
   private async ensureProcess(): Promise<void> {
-    if (this.process && !this.process.killed) return;
-    // Wait for the "spawn" event before sending initialize — otherwise a failed
-    // first spawn (ENOENT on Windows .cmd shims) would swallow the request.
-    await this.spawnServer(process.env.CODEX_BIN ?? "codex", false);
-    await this.request("initialize", { clientInfo: { name: "sts2_draft_advisor", title: "STS2 Draft Advisor", version: "0.1.0" } });
-    this.send({ method: "initialized", params: {} });
+    if (this.initializing) return this.initializing;
+    if (this.initialized) return;
+    const initializing = this.initialize();
+    this.initializing = initializing;
+    try {
+      await initializing;
+    } finally {
+      if (this.initializing === initializing) this.initializing = null;
+    }
   }
-  private spawnServer(command: string, useShell: boolean): Promise<void> {
-    const child = spawn(command, ["app-server"], { stdio: ["pipe", "pipe", "pipe"], shell: useShell });
-    child.stdout.setEncoding("utf8"); child.stdout.on("data", (chunk: string) => this.read(chunk));
-    child.stderr.setEncoding("utf8"); child.stderr.on("data", (chunk: string) => this.hooks.onStatus({ log: chunk.trim() }));
-    return new Promise((resolve, reject) => {
-      child.once("error", (error: NodeJS.ErrnoException) => {
-        // npm-installed CLIs on Windows are .cmd shims that need a shell to spawn.
-        if (!useShell && process.platform === "win32" && !process.env.CODEX_BIN) {
-          this.spawnServer(command, true).then(resolve, reject);
-          return;
+
+  private async initialize(): Promise<void> {
+    const generation = this.generation;
+    try {
+      await this.transport.start();
+      if (generation !== this.generation) throw new Error("Codex App Serverが停止しました。");
+      await this.transport.request("initialize", {
+        clientInfo: { name: "sts2_draft_advisor", title: "STS2 Draft Advisor", version: "0.1.0" },
+      });
+      this.transport.notify({ method: "initialized", params: {} });
+      this.initialized = true;
+    } catch (error) {
+      if (generation === this.generation) this.transport.stop();
+      throw error;
+    }
+  }
+
+  private handle(message: RpcMessage): void {
+    const method = message.method;
+    if (method === "item/agentMessage/delta") {
+      if (!this.completion) return;
+      const params = asRecord(message.params);
+      const delta = typeof params?.delta === "string" ? params.delta : typeof params?.text === "string" ? params.text : "";
+      if (delta) {
+        if (!this.sawDelta) {
+          this.sawDelta = true;
+          this.hooks.onStatus({ log: "← delta stream started" });
         }
-        reject(new Error(`codex の起動に失敗しました: ${error.message}`));
-      });
-      child.once("spawn", () => {
-        this.process = child;
-        // Runtime errors after a successful spawn.
-        child.on("error", (error: Error) => {
-          if (this.process === child) this.process = null;
-          this.failAll(new Error(`codex の起動に失敗しました: ${error.message}`));
-        });
-        child.on("exit", () => {
-          if (this.process !== child) return;
-          this.process = null; this.threadId = null; this.model = null; this.effort = null;
-          this.failAll(new Error("Codex App Serverが終了しました。"));
-        });
-        resolve();
-      });
-    });
+        this.hooks.onDelta(delta);
+      }
+    } else if (method === "turn/completed") {
+      if (!this.completion) return;
+      const params = asRecord(message.params);
+      const turn = asRecord(params?.turn);
+      const turnStatus = typeof turn?.status === "string" ? turn.status : "?";
+      this.hooks.onStatus({ log: `← turn/completed (${turnStatus})` });
+      if (turn?.status && turnStatus !== "completed") {
+        const error = asRecord(turn?.error);
+        this.completion?.reject(new Error(typeof error?.message === "string" ? error.message : `相談が${turnStatus}状態で終了しました。`));
+      } else {
+        this.completion?.resolve();
+      }
+      this.completion = null;
+      this.hooks.onCompleted();
+    } else if (method === "error") {
+      const params = asRecord(message.params);
+      const error = asRecord(params?.error);
+      this.hooks.onStatus({ error: typeof error?.message === "string" ? error.message : "Codexエラー" });
+    } else if (method === "account/updated") {
+      const params = asRecord(message.params);
+      this.hooks.onStatus({ authMode: params?.authMode, planType: params?.planType });
+    } else if (method) {
+      this.hooks.onStatus({ log: `← ${method}` });
+    }
   }
-  private failAll(error: Error): void {
-    for (const waiter of this.pending.values()) waiter.reject(error);
-    this.pending.clear();
+
+  private handleTransportExit(error: Error): void {
+    this.generation++;
+    this.initializing = null;
+    this.resetSession();
     this.completion?.reject(error);
     this.completion = null;
   }
-  private request(method: string, params: unknown): Promise<any> {
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.hooks.onStatus({ log: `→ ${method}` });
-      try { this.send({ method, id, params }); }
-      catch (error) { this.pending.delete(id); reject(error); return; }
-      setTimeout(() => {
-        if (this.pending.delete(id)) reject(new Error(`Codex が応答しません (${method})`));
-      }, 60000);
-    });
+
+  private resetSession(): void {
+    this.threadId = null;
+    this.model = null;
+    this.effort = null;
+    this.initialized = false;
   }
-  private send(value: object): void { if (!this.process?.stdin.writable) throw new Error("Codex App Serverへ接続できません。"); this.process.stdin.write(`${JSON.stringify(value)}\n`); }
-  private read(chunk: string): void {
-    this.buffer += chunk; let end = this.buffer.indexOf("\n");
-    while (end >= 0) { const line = this.buffer.slice(0, end).trim(); this.buffer = this.buffer.slice(end + 1); if (line) { try { this.handle(JSON.parse(line)); } catch (error) { this.hooks.onStatus({ error: String(error) }); } } end = this.buffer.indexOf("\n"); }
-  }
-  private handle(message: any): void {
-    if (typeof message.id === "number" && this.pending.has(message.id)) {
-      const waiter = this.pending.get(message.id)!; this.pending.delete(message.id);
-      this.hooks.onStatus({ log: `← #${message.id} ${message.error ? "error" : "ok"}` });
-      if (message.error) waiter.reject(new Error(message.error.message ?? "Codexエラー")); else waiter.resolve(message.result); return;
-    }
-    const method = message.method as string | undefined;
-    if (method === "item/agentMessage/delta") {
-      const delta = message.params?.delta ?? message.params?.text ?? "";
-      if (delta) { if (!this.sawDelta) { this.sawDelta = true; this.hooks.onStatus({ log: "← delta stream started" }); } this.hooks.onDelta(delta); }
-    }
-    else if (method === "turn/completed") {
-      this.hooks.onStatus({ log: `← turn/completed (${message.params?.turn?.status ?? "?"})` });
-      const turn = message.params?.turn;
-      if (turn?.status && turn.status !== "completed") this.completion?.reject(new Error(turn.error?.message ?? `相談が${turn.status}状態で終了しました。`));
-      else this.completion?.resolve();
-      this.completion = null;
-      this.hooks.onCompleted();
-    }
-    else if (method === "error") this.hooks.onStatus({ error: message.params?.error?.message ?? "Codexエラー" });
-    else if (method === "account/updated") this.hooks.onStatus({ authMode: message.params?.authMode, planType: message.params?.planType });
-    else if (method) this.hooks.onStatus({ log: `← ${method}` });
-  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
 }
