@@ -116,7 +116,12 @@ function setupServices(): void {
   pipe.on("connection", (connected: boolean) => sendRenderer("connection-status", { connected }));
   pipe.on("toggle", toggleWindow);
   pipe.start(); context = new CodexContextService();
-  codex = new CodexAppServerClient({ onDelta: delta => sendRenderer("chat-delta", delta), onCompleted: () => sendRenderer("chat-done"), onStatus: status => sendRenderer("codex-status", status), onAuthUrl: url => void shell.openExternal(url) });
+  codex = new CodexAppServerClient({
+    onDelta: delta => sendRenderer("chat-delta", delta),
+    onCompleted: () => sendRenderer("chat-done"),
+    onStatus: status => { if (status.log || status.error) log(`codex: ${status.log ?? status.error}`); sendRenderer("codex-status", status); },
+    onAuthUrl: url => void shell.openExternal(url),
+  });
 }
 async function ask(question: string): Promise<void> {
   if (!codex || !context || !latestState) throw new Error("ゲーム状態がまだ取得できません。");

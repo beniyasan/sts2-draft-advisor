@@ -78,7 +78,7 @@ export class CodexAppServerClient {
     const child = spawn(command, ["app-server"], { stdio: ["pipe", "pipe", "pipe"], shell: useShell });
     this.process = child;
     child.stdout.setEncoding("utf8"); child.stdout.on("data", (chunk: string) => this.read(chunk));
-    child.stderr.on("data", (chunk: string) => this.hooks.onStatus({ log: chunk.trim() }));
+    child.stderr.setEncoding("utf8"); child.stderr.on("data", (chunk: string) => this.hooks.onStatus({ log: chunk.trim() }));
     // Without an "error" listener a missing codex binary would crash the app.
     child.on("error", (error: NodeJS.ErrnoException) => {
       // npm-installed CLIs on Windows are .cmd shims that need a shell to spawn.
