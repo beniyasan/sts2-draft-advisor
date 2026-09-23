@@ -22,6 +22,7 @@ public static class OverlayBridge
         WriteIndented = false,
     };
     private static readonly object Gate = new();
+    private static readonly Queue<string> _outbox = new();
     private static OverlayGameState? _latest;
     private static NamedPipeServerStream? _client;
     private static StreamWriter? _writer;
@@ -48,7 +49,18 @@ public static class OverlayBridge
         KickFlush();
     }
 
-    /// <summary>Mark the latest state dirty and ensure a flush task is draining it.</summary>
+    /// <summary>Ask the overlay to toggle its window (fired by the in-game hotkey).</summary>
+    public static void SendToggle() => SendMessage(new OverlayPipeMessage { Type = "toggle_window" });
+
+    /// <summary>Queue a one-off JSON line for the overlay. Dropped when no client is connected.</summary>
+    private static void SendMessage(object message)
+    {
+        var payload = JsonSerializer.Serialize(message, JsonOptions);
+        lock (Gate) _outbox.Enqueue(payload);
+        KickFlush();
+    }
+
+    /// <summary>Mark pending work and ensure a flush task is draining it.</summary>
     private static void KickFlush()
     {
         lock (Gate)
@@ -60,28 +72,34 @@ public static class OverlayBridge
         _ = Task.Run(FlushLoop);
     }
 
-    /// <summary>Latest-wins writer loop; only one instance ever runs at a time.</summary>
+    /// <summary>Single writer loop: drains queued messages first, then the latest state.</summary>
     private static async Task FlushLoop()
     {
         while (true)
         {
-            OverlayGameState? state;
+            string? payload;
             StreamWriter? writer;
             lock (Gate)
             {
-                if (!_dirty)
+                if (_outbox.Count == 0 && !_dirty)
                 {
                     _flushRunning = false;
                     return;
                 }
-                _dirty = false;
-                state = _latest;
+                if (_outbox.Count > 0)
+                {
+                    payload = _outbox.Dequeue();
+                }
+                else
+                {
+                    _dirty = false;
+                    payload = _latest == null ? null : JsonSerializer.Serialize(_latest, JsonOptions);
+                }
                 writer = _writer;
             }
-            if (state == null || writer == null) continue;
+            if (payload == null || writer == null) continue;
             try
             {
-                var payload = JsonSerializer.Serialize(state, JsonOptions);
                 await writer.WriteLineAsync(payload).ConfigureAwait(false);
                 await writer.FlushAsync().ConfigureAwait(false);
             }

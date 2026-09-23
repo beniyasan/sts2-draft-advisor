@@ -9,3 +9,8 @@ build/
 
 overlay/node_modules/
 overlay/dist/
+
+# Licensed Live2D assets — fetched by scripts/fetch-model.mjs, never committed.
+overlay/assets/
+overlay/vendor/
+overlay/overlay.log

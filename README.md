@@ -47,34 +47,41 @@ cards straight from the running game.
 ## Chat overlay (Windows)
 
 The mod can stream the current deck, relics and offered cards to the optional
-Electron companion overlay. The overlay displays a transparent chat window and
-a replaceable Live2D placeholder, and sends Japanese deck/card questions to
-Codex App Server with Spire Codex context.
+Electron companion overlay. The overlay displays a transparent chat window with
+a Live2D avatar and sends Japanese deck/card questions to Codex App Server with
+Spire Codex context.
 
 1. Install Node.js 22+ and the Codex CLI, then complete the Codex/ChatGPT login
    once in the companion app.
-2. Build the overlay:
-
-   ```bash
-   cd overlay
-   npm install
-   npm run build
-   npm start
-   ```
-
-3. Start the game with the Draft Advisor MOD enabled. The overlay opens visibly.
-   Press `Ctrl+Shift+D` to minimize or restore it; if the desktop cannot register
-   that shortcut, use its taskbar button. `更新` requests the latest state from
-   the MOD.
+2. On Windows, run `overlay\scripts\setup-overlay.cmd` once (installs
+   dependencies and builds). To fetch the official Live2D *zundamon* sample
+   model, run `node scripts\fetch-model.mjs --agree` inside `overlay/` — the
+   licensed assets are not bundled, so this downloads them locally.
+   Without the model the overlay shows a styled placeholder instead.
+3. Start the game with the Draft Advisor MOD enabled. The MOD auto-launches the
+   overlay if it is installed next to the mod DLL (`overlay/` inside the mod
+   folder or a sibling `DraftAdvisor.overlay/`); you can also start it manually
+   with `overlay\scripts\start-overlay.cmd`.
+4. Press `Ctrl+Shift+D` to hide or restore the overlay. The shortcut is handled
+   both inside the game (via the named pipe) and globally by the overlay
+   itself, so it works whichever side receives the key. `更新` requests the
+   latest state from the MOD.
 
 The overlay prefers `gpt-6-luna` when the connected Codex App Server reports it
 through `model/list`. Set `CODEX_BIN` if the `codex` executable is not on PATH.
 The game MOD and overlay communicate only through the local
 `DraftAdvisor.v1` named pipe. No OpenAI credential is stored in the game MOD.
 
-Live2D model files are intentionally not bundled. When a licensed Cubism model
-is available, replace the placeholder through the `Live2DAdapter` boundary in
-`overlay/src/renderer/live2d.ts`.
+Diagnostics: the overlay appends to `overlay/overlay.log`. If the transparent
+window renders as a black rectangle on your GPU, set `OVERLAY_OPAQUE=1` before
+starting; `OVERLAY_SHOT_DIR=<dir>` writes a screenshot for debugging.
+
+The Live2D avatar uses the official Cubism 5 zundamon sample (downloaded by
+`fetch-model.mjs` under `overlay/assets/live2d/`, plus the Cubism Core runtime
+in `overlay/vendor/`). Both directories are gitignored because of the sample
+license. When a different licensed Cubism 5 model is preferred, drop its
+`.model3.json` tree into `assets/live2d/` and update
+`assets/live2d/manifest.json`.
 
 ## Build
 
