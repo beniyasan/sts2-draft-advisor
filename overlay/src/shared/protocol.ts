@@ -19,6 +19,7 @@ export interface OverlayApi {
   onDelta(listener: (delta: string) => void): () => void;
   onChatDone(listener: () => void): () => void;
   onStatus(listener: (status: RendererStatus) => void): () => void;
+  rendererReady(): Promise<void>;
   ask(question: string): Promise<void>; login(): Promise<void>; refreshState(): Promise<void>; minimize(): Promise<void>;
 }
 declare global { interface Window { draftAdvisor: OverlayApi; } }

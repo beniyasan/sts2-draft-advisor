@@ -118,6 +118,7 @@ test("controller handles IPC, failed asks, unsubscribe and DOM listener removal"
   const api = {
     onState: subscribe("state"), onDelta: subscribe("delta"),
     onChatDone: subscribe("done"), onStatus: subscribe("status"),
+    rendererReady: async () => {},
     ask: question => { questions.push(question); return new Promise((_resolve, reject) => { rejectAsk = reject; }); },
     login: async () => {}, refreshState: async () => {}, minimize: async () => {},
   };

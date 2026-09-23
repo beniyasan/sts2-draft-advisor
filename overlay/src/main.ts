@@ -7,6 +7,7 @@ import { CodexContextService } from "./services/codexContext";
 import { PipeClient } from "./services/pipeClient";
 import { OverlayWindow } from "./main/overlayWindow";
 import { GameState } from "./shared/protocol";
+import { GameStateRelay } from "./main/gameStateRelay";
 
 const assetsRoot = join(__dirname, "..", "assets", "live2d");
 
@@ -32,18 +33,19 @@ let pipe: PipeClient | null = null;
 let codex: CodexAppServerClient | null = null;
 let context: CodexContextService | null = null;
 let latestState: GameState | null = null;
+let relay: GameStateRelay;
 
 function setupServices(): void {
   pipe = new PipeClient();
   pipe.on("state", (state: GameState) => {
     log(`game_state: ${state.screen?.kind ?? "?"}`);
     latestState = state;
-    overlay.send("game-state", state);
-    overlay.send("connection-status", { connected: true });
+    relay.publishState(state);
+    relay.publishConnection(true);
   });
   pipe.on("connection", (connected: boolean) => {
     if (!connected) latestState = null;
-    overlay.send("connection-status", { connected });
+    relay.publishConnection(connected);
   });
   pipe.on("toggle", () => overlay.toggle());
   pipe.on("log", (message: string) => log(message));
@@ -70,6 +72,8 @@ if (!gotLock) {
 } else {
   app.on("second-instance", () => overlay.show());
   app.whenReady().then(() => {
+    relay = new GameStateRelay((channel, value) => overlay.send(channel, value), () => pipe?.requestState());
+    ipcMain.handle("renderer-ready", () => relay.markRendererReady());
     protocol.handle("live2d", request => {
       // live2d://model/<path under assets/live2d>
       const rel = normalize(decodeURIComponent(new URL(request.url).pathname).replace(/^[/\\]+/, ""));

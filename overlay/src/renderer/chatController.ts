@@ -57,6 +57,7 @@ export class ChatController {
       if (this.presets.remove(presetSelect.value)) view.renderPresets(this.presets.list());
     }, options);
     this.render();
+    void api.rendererReady();
   }
 
   destroy(): void {

@@ -7,7 +7,33 @@ import { loadSource } from "./load-source.mjs";
 const { PipeClient, CodexTransport, CodexAppServerClient } = await loadSource([
   "./src/services/pipeClient.ts", "./src/services/codexTransport.ts", "./src/services/codexAppServer.ts",
 ]);
+const { GameStateRelay } = await loadSource(["./src/main/gameStateRelay.ts"]);
 const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test("game state relay replays the latest state when the renderer becomes ready", () => {
+  const sent = [], requests = [];
+  const relay = new GameStateRelay((channel, value) => sent.push([channel, value]), () => requests.push(true));
+  const state = { type: "game_state", runId: "run-1" };
+  relay.publishState(state);
+  relay.publishConnection(true);
+  assert.deepEqual(sent, []);
+  relay.markRendererReady();
+  assert.deepEqual(sent, [["connection-status", { connected: true }], ["game-state", state]]);
+  assert.deepEqual(requests, []);
+});
+
+test("game state relay requests a snapshot when it has no cached state", () => {
+  const sent = [], requests = [];
+  const relay = new GameStateRelay((channel, value) => sent.push([channel, value]), () => requests.push(true));
+  relay.publishConnection(true);
+  relay.markRendererReady();
+  assert.deepEqual(sent, [["connection-status", { connected: true }]]);
+  assert.equal(requests.length, 1);
+  relay.publishState({ type: "game_state", runId: "run-2" });
+  assert.equal(sent.at(-1)[0], "game-state");
+  relay.publishConnection(false);
+  assert.deepEqual(sent.at(-1), ["connection-status", { connected: false }]);
+});
 
 class FakeSocket extends EventEmitter {
   destroyed = false;
