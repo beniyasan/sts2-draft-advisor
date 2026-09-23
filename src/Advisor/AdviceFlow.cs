@@ -1,5 +1,6 @@
 using DraftAdvisor.Codex;
 using DraftAdvisor.Game;
+using DraftAdvisor.IPC;
 using DraftAdvisor.UI;
 using Godot;
 using MegaCrit.Sts2.Core.Logging;
@@ -65,7 +66,20 @@ public static class AdviceFlow
     /// <summary>Called from Harmony postfix when a selection screen closes.</summary>
     public static void OnScreenClosed(Node screen)
     {
-        Session.Close(screen);
+        // Publish the cleared state only when the screen that actually owned
+        // this session closed; unrelated close events leave the overlay state
+        // and the run snapshot untouched.
+        if (!Session.Close(screen)) return;
+        try
+        {
+            var snapshot = RunInspector.Capture();
+            if (snapshot != null)
+                OverlayBridge.PublishState("none", snapshot, Array.Empty<OfferAdvice>());
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[DraftAdvisor] overlay publish failed: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -112,6 +126,7 @@ public static class AdviceFlow
             }
 
             var offers = views.Select(v => v.Advice).ToList();
+            OverlayBridge.PublishState(screen.GetType().Name, snap, offers);
             var offeredCardIds = offers.Where(o => !o.IsRelic).Select(o => o.Id).ToList();
             // Pairings are fetched once per distinct relic id; duplicates share advice.
             var distinctRelicIds = offers.Where(o => o.IsRelic).Select(o => o.Id)
@@ -188,16 +203,18 @@ internal sealed class ScreenSessionState
         return generation;
     }
 
-    public void Close(Node screen)
+    /// <summary>Returns true when the closed screen owned the active session.</summary>
+    public bool Close(Node screen)
     {
         // Several nested selection and event nodes can close during one flow.
         // Only the screen currently supplying advice may invalidate that session.
-        if (!ReferenceEquals(_currentScreen, screen)) return;
+        if (!ReferenceEquals(_currentScreen, screen)) return false;
         _fetchCancellation?.Cancel();
         _fetchCancellation = null;
         _generation++;
         _currentScreen = null;
         AdvisorUi.Clear();
+        return true;
     }
 
     public bool TryGetCurrentScreen(out Node screen)

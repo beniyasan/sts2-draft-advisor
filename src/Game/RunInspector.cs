@@ -17,6 +17,7 @@ public static class RunInspector
     {
         public string Character { get; set; } = "ironclad";
         public List<string> DeckCardIds { get; } = new();
+        public List<bool> DeckCardUpgraded { get; } = new();
         public List<string> RelicIds { get; } = new();
         /// <summary>Items for the draft-advice API: "cards:ID" / "relics:ID".</summary>
         public List<string> HeldItems { get; } = new();
@@ -44,6 +45,7 @@ public static class RunInspector
                 var id = NormalizeId(ModelAccess.EntryOf(card));
                 if (string.IsNullOrEmpty(id)) continue;
                 snap.DeckCardIds.Add(id);
+                snap.DeckCardUpgraded.Add(ModelAccess.IsUpgraded(card));
                 snap.HeldItems.Add($"cards:{id}");
                 var title = ModelAccess.SafeTitle(card);
                 if (!string.IsNullOrEmpty(title))

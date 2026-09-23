@@ -1,0 +1,31 @@
+{
+  "name": "draft-advisor-overlay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Transparent companion overlay for the Slay the Spire 2 Draft Advisor mod.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node test/smoke.mjs && node --test test/communication.test.mjs test/renderer.test.mjs test/codex-context.test.mjs",
+    "setup:live2d": "node scripts/fetch-model.mjs",
+    "start": "electron .",
+    "dev": "npm run build && electron ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^38.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "^5.9.0"
+  },
+  "allowScripts": {
+    "electron@38.8.6": true,
+    "esbuild@0.28.2": true
+  },
+  "dependencies": {
+    "@pixi/sound": "6.0.1",
+    "live2d-renderer": "^0.6.6",
+    "pixi.js": "8.20.1",
+    "untitled-pixi-live2d-engine": "1.3.5"
+  }
+}

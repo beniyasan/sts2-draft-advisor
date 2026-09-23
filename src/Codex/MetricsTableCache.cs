@@ -35,8 +35,15 @@ internal sealed class MetricsTableCache
 
             var map = new Dictionary<string, MetricRow>(StringComparer.OrdinalIgnoreCase);
             foreach (var row in response.Rows)
+            {
                 if (!string.IsNullOrEmpty(row.Id))
+                {
                     map[row.Id] = row;
+                    var canonical = CodexId.Canonical(row.Id);
+                    if (!string.IsNullOrEmpty(canonical))
+                        map[canonical] = row;
+                }
+            }
 
             lock (_cacheLock)
                 _caches[entityType] = (map, DateTime.UtcNow);

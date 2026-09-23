@@ -1,5 +1,6 @@
 using DraftAdvisor.Codex;
 using DraftAdvisor.Game;
+using MegaCrit.Sts2.Core.Logging;
 
 namespace DraftAdvisor.Advisor;
 
@@ -8,6 +9,8 @@ namespace DraftAdvisor.Advisor;
 /// </summary>
 public static class AdviceMerger
 {
+    private static readonly HashSet<string> MissingMetricLog = new(StringComparer.OrdinalIgnoreCase);
+
     public static void MergeAdvice(
         List<OfferAdvice> offers,
         DraftAdviceResponse? advice,
@@ -22,7 +25,7 @@ public static class AdviceMerger
             {
                 var r = advice.Ranked[i];
                 foreach (var offer in offers.Where(o => !o.IsRelic &&
-                    string.Equals(o.Id, r.Id, StringComparison.OrdinalIgnoreCase)))
+                    SameId(o.Id, r.Id)))
                 {
                     offer.AdviceRank = i + 1;
                     offer.AdviceScore = r.Score;
@@ -37,7 +40,7 @@ public static class AdviceMerger
             foreach (var c in coach.Offers)
             {
                 foreach (var offer in offers.Where(o => !o.IsRelic &&
-                    string.Equals(o.Id, c.Id, StringComparison.OrdinalIgnoreCase)))
+                    SameId(o.Id, c.Id)))
                 {
                     offer.CoachScore = c.CoachScore;
                     offer.CommitmentDelta = c.CommitmentDelta;
@@ -50,7 +53,7 @@ public static class AdviceMerger
         {
             foreach (var offer in offers.Where(o => !o.IsRelic))
             {
-                if (metrics.TryGetValue(offer.Id, out var m))
+                if (TryGetMetric(metrics, offer.Id, out var m))
                     offer.Metrics = m;
             }
         }
@@ -76,9 +79,9 @@ public static class AdviceMerger
                 : partners.Where(p => deckIds.Contains(p.Id)).Take(2).Select(p => p.Name).ToList();
 
             foreach (var offer in offers.Where(o => o.IsRelic &&
-                string.Equals(o.Id, relicIds[i], StringComparison.OrdinalIgnoreCase)))
+                SameId(o.Id, relicIds[i])))
             {
-                if (metrics != null && metrics.TryGetValue(offer.Id, out var m))
+                if (metrics != null && TryGetMetric(metrics, offer.Id, out var m))
                     offer.Metrics = m;
                 offer.PairNames = pairNames;
             }
@@ -93,5 +96,20 @@ public static class AdviceMerger
             if (o.Metrics == null) continue;
             o.AdviceRank = ++rank;
         }
+    }
+
+    private static bool SameId(string left, string right) =>
+        string.Equals(left, right, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(CodexId.Canonical(left), CodexId.Canonical(right), StringComparison.Ordinal);
+
+    private static bool TryGetMetric(
+        Dictionary<string, MetricRow> metrics, string id, out MetricRow row)
+    {
+        if (metrics.TryGetValue(id, out row!)) return true;
+        var canonical = CodexId.Canonical(id);
+        if (!string.IsNullOrEmpty(canonical) && metrics.TryGetValue(canonical, out row!)) return true;
+        if (MissingMetricLog.Add(id))
+            Log.Info($"[DraftAdvisor] metrics row missing: id={id}, canonical={canonical}");
+        return false;
     }
 }
