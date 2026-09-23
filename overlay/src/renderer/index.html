@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Draft Advisor</title><link rel="stylesheet" href="renderer.css"></head>
+<body><main id="app">
+  <section class="avatar-panel"><button id="close" title="最小化">−</button><div id="avatar" class="avatar">Draft Advisor</div><div id="status">ゲーム接続待ち</div></section>
+  <section class="chat-panel"><header><strong>Draft Advisor</strong><span id="model"></span><button id="login">ログイン</button><button id="refresh">更新</button></header><div id="context" class="context">ゲーム状態を待っています</div><div id="messages" class="messages"></div><form id="form"><textarea id="input" rows="2" placeholder="このデッキで何を取るべき？"></textarea><button type="submit">送信</button></form></section>
+</main><script src="renderer.js"></script></body></html>

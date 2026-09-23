@@ -1,4 +1,5 @@
 using HarmonyLib;
+using DraftAdvisor.IPC;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Modding;
 
@@ -15,6 +16,7 @@ public static class ModEntry
         try
         {
             new Harmony("beniyasan.draftadvisor").PatchAll(typeof(ModEntry).Assembly);
+            OverlayBridge.Start();
             Log.Info("[DraftAdvisor] Harmony patches applied.");
         }
         catch (Exception ex)

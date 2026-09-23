@@ -1,5 +1,6 @@
 using DraftAdvisor.Codex;
 using DraftAdvisor.Game;
+using DraftAdvisor.IPC;
 using DraftAdvisor.UI;
 using Godot;
 using MegaCrit.Sts2.Core.Logging;
@@ -66,6 +67,16 @@ public static class AdviceFlow
     public static void OnScreenClosed(Node screen)
     {
         Session.Close(screen);
+        try
+        {
+            var snapshot = RunInspector.Capture();
+            if (snapshot != null)
+                OverlayBridge.PublishState("none", snapshot, Array.Empty<OfferAdvice>());
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[DraftAdvisor] overlay publish failed: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -112,6 +123,7 @@ public static class AdviceFlow
             }
 
             var offers = views.Select(v => v.Advice).ToList();
+            OverlayBridge.PublishState(screen.GetType().Name, snap, offers);
             var offeredCardIds = offers.Where(o => !o.IsRelic).Select(o => o.Id).ToList();
             // Pairings are fetched once per distinct relic id; duplicates share advice.
             var distinctRelicIds = offers.Where(o => o.IsRelic).Select(o => o.Id)

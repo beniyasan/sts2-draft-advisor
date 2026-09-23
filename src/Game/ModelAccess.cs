@@ -30,4 +30,19 @@ public static class ModelAccess
         }
         catch { return null; }
     }
+
+    public static bool IsUpgraded(AbstractModel model)
+    {
+        try
+        {
+            var type = model.GetType();
+            var flag = type.GetProperty("IsUpgraded", BindingFlags.Public | BindingFlags.Instance)?.GetValue(model);
+            if (flag is bool upgraded) return upgraded;
+            var level = (type.GetProperty("UpgradeLevel", BindingFlags.Public | BindingFlags.Instance)
+                ?? type.GetProperty("CurrentUpgradeLevel", BindingFlags.Public | BindingFlags.Instance))
+                ?.GetValue(model);
+            return level is int n && n > 0;
+        }
+        catch { return false; }
+    }
 }

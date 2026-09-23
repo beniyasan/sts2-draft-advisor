@@ -1,0 +1,21 @@
+{
+  "name": "draft-advisor-overlay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Transparent companion overlay for the Slay the Spire 2 Draft Advisor mod.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "npm run build && node test/smoke.mjs",
+    "start": "electron .",
+    "dev": "npm run build && electron ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^38.0.0",
+    "typescript": "^5.9.0"
+  },
+  "allowScripts": {
+    "electron@38.8.6": true
+  }
+}

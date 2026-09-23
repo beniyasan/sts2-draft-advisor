@@ -44,6 +44,38 @@ cards straight from the running game.
 3. Copy `DraftAdvisor.dll` and `DraftAdvisor.json` into it.
 4. Launch the game → Settings → Modding → enable *Draft Advisor* → restart.
 
+## Chat overlay (Windows)
+
+The mod can stream the current deck, relics and offered cards to the optional
+Electron companion overlay. The overlay displays a transparent chat window and
+a replaceable Live2D placeholder, and sends Japanese deck/card questions to
+Codex App Server with Spire Codex context.
+
+1. Install Node.js 22+ and the Codex CLI, then complete the Codex/ChatGPT login
+   once in the companion app.
+2. Build the overlay:
+
+   ```bash
+   cd overlay
+   npm install
+   npm run build
+   npm start
+   ```
+
+3. Start the game with the Draft Advisor MOD enabled. The overlay opens visibly.
+   Press `Ctrl+Shift+D` to minimize or restore it; if the desktop cannot register
+   that shortcut, use its taskbar button. `更新` requests the latest state from
+   the MOD.
+
+The overlay prefers `gpt-6-luna` when the connected Codex App Server reports it
+through `model/list`. Set `CODEX_BIN` if the `codex` executable is not on PATH.
+The game MOD and overlay communicate only through the local
+`DraftAdvisor.v1` named pipe. No OpenAI credential is stored in the game MOD.
+
+Live2D model files are intentionally not bundled. When a licensed Cubism model
+is available, replace the placeholder through the `Live2DAdapter` boundary in
+`overlay/src/renderer/live2d.ts`.
+
 ## Build
 
 Requires .NET 9 SDK and three assemblies from your game install
