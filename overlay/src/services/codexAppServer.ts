@@ -23,21 +23,29 @@ export class CodexAppServerClient {
   private process: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1; private pending = new Map<number, Pending>(); private buffer = "";
   private threadId: string | null = null; private model: string | null = null;
-  private effort: string | null = null; private busy = false;
+  private effort: string | null = null; private busy = false; private sawDelta = false;
   private completion: { resolve: () => void; reject: (error: Error) => void } | null = null;
   constructor(private readonly hooks: CodexHooks) {}
 
   async ask(prompt: string): Promise<void> {
     await this.ensureReady(); if (this.busy) throw new Error("前の相談がまだ処理中です。"); this.busy = true;
+    this.sawDelta = false;
     try {
-      await new Promise<void>(async (resolve, reject) => {
-        this.completion = { resolve, reject };
-        try {
-          await this.request("turn/start", { threadId: this.threadId, input: [{ type: "text", text: prompt, text_elements: [] }], model: this.model, effort: this.effort, summary: "concise" });
-        } catch (error) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
           this.completion = null;
-          reject(error instanceof Error ? error : new Error(String(error)));
-        }
+          reject(new Error("Codex の回答がタイムアウトしました。"));
+        }, 180000);
+        this.completion = {
+          resolve: () => { clearTimeout(timer); resolve(); },
+          reject: (error: Error) => { clearTimeout(timer); reject(error); },
+        };
+        this.request("turn/start", { threadId: this.threadId, input: [{ type: "text", text: prompt, text_elements: [] }], model: this.model, effort: this.effort, summary: "concise" })
+          .catch((error: unknown) => {
+            this.completion = null;
+            clearTimeout(timer);
+            reject(error instanceof Error ? error : new Error(String(error)));
+          });
       });
     } finally { this.busy = false; this.completion = null; }
   }
@@ -105,7 +113,15 @@ export class CodexAppServerClient {
   }
   private request(method: string, params: unknown): Promise<any> {
     const id = this.nextId++;
-    return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.send({ method, id, params }); });
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.hooks.onStatus({ log: `→ ${method}` });
+      try { this.send({ method, id, params }); }
+      catch (error) { this.pending.delete(id); reject(error); return; }
+      setTimeout(() => {
+        if (this.pending.delete(id)) reject(new Error(`Codex が応答しません (${method})`));
+      }, 60000);
+    });
   }
   private send(value: object): void { if (!this.process?.stdin.writable) throw new Error("Codex App Serverへ接続できません。"); this.process.stdin.write(`${JSON.stringify(value)}\n`); }
   private read(chunk: string): void {
@@ -115,11 +131,16 @@ export class CodexAppServerClient {
   private handle(message: any): void {
     if (typeof message.id === "number" && this.pending.has(message.id)) {
       const waiter = this.pending.get(message.id)!; this.pending.delete(message.id);
+      this.hooks.onStatus({ log: `← #${message.id} ${message.error ? "error" : "ok"}` });
       if (message.error) waiter.reject(new Error(message.error.message ?? "Codexエラー")); else waiter.resolve(message.result); return;
     }
     const method = message.method as string | undefined;
-    if (method === "item/agentMessage/delta") { const delta = message.params?.delta ?? message.params?.text ?? ""; if (delta) this.hooks.onDelta(delta); }
+    if (method === "item/agentMessage/delta") {
+      const delta = message.params?.delta ?? message.params?.text ?? "";
+      if (delta) { if (!this.sawDelta) { this.sawDelta = true; this.hooks.onStatus({ log: "← delta stream started" }); } this.hooks.onDelta(delta); }
+    }
     else if (method === "turn/completed") {
+      this.hooks.onStatus({ log: `← turn/completed (${message.params?.turn?.status ?? "?"})` });
       const turn = message.params?.turn;
       if (turn?.status && turn.status !== "completed") this.completion?.reject(new Error(turn.error?.message ?? `相談が${turn.status}状態で終了しました。`));
       else this.completion?.resolve();
@@ -128,5 +149,6 @@ export class CodexAppServerClient {
     }
     else if (method === "error") this.hooks.onStatus({ error: message.params?.error?.message ?? "Codexエラー" });
     else if (method === "account/updated") this.hooks.onStatus({ authMode: message.params?.authMode, planType: message.params?.planType });
+    else if (method) this.hooks.onStatus({ log: `← ${method}` });
   }
 }
