@@ -3,7 +3,7 @@
   "name": "Draft Advisor",
   "author": "beniyasan",
   "description": "Card pick assistant: overlays community pick-rate, win-rate and deck-fit advice from spire-codex.com on card reward screens.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "has_pck": false,
   "has_dll": true,
   "dependencies": [],
