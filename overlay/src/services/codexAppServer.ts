@@ -70,18 +70,29 @@ export class CodexAppServerClient {
   }
   private async ensureProcess(): Promise<void> {
     if (this.process && !this.process.killed) return;
-    const command = process.env.CODEX_BIN ?? "codex";
-    this.process = spawn(command, ["app-server"], { stdio: ["pipe", "pipe", "pipe"] });
-    this.process.stdout.setEncoding("utf8"); this.process.stdout.on("data", (chunk: string) => this.read(chunk));
-    this.process.stderr.on("data", (chunk: string) => this.hooks.onStatus({ log: chunk.trim() }));
+    this.spawnServer(process.env.CODEX_BIN ?? "codex", false);
+    await this.request("initialize", { clientInfo: { name: "sts2_draft_advisor", title: "STS2 Draft Advisor", version: "0.1.0" } });
+    this.send({ method: "initialized", params: {} });
+  }
+  private spawnServer(command: string, useShell: boolean): void {
+    const child = spawn(command, ["app-server"], { stdio: ["pipe", "pipe", "pipe"], shell: useShell });
+    this.process = child;
+    child.stdout.setEncoding("utf8"); child.stdout.on("data", (chunk: string) => this.read(chunk));
+    child.stderr.on("data", (chunk: string) => this.hooks.onStatus({ log: chunk.trim() }));
     // Without an "error" listener a missing codex binary would crash the app.
-    this.process.on("error", (error: Error) => this.failAll(new Error(`codex の起動に失敗しました: ${error.message}`)));
-    this.process.on("exit", () => {
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      // npm-installed CLIs on Windows are .cmd shims that need a shell to spawn.
+      if (error.code === "ENOENT" && !useShell && process.platform === "win32" && !process.env.CODEX_BIN) {
+        this.spawnServer(command, true);
+        return;
+      }
+      this.failAll(new Error(`codex の起動に失敗しました: ${error.message}`));
+    });
+    child.on("exit", () => {
+      if (this.process !== child) return;
       this.process = null; this.threadId = null; this.model = null; this.effort = null;
       this.failAll(new Error("Codex App Serverが終了しました。"));
     });
-    await this.request("initialize", { clientInfo: { name: "sts2_draft_advisor", title: "STS2 Draft Advisor", version: "0.1.0" } });
-    this.send({ method: "initialized", params: {} });
   }
   private failAll(error: Error): void {
     for (const waiter of this.pending.values()) waiter.reject(error);
