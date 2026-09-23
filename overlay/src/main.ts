@@ -41,7 +41,10 @@ function setupServices(): void {
     overlay.send("game-state", state);
     overlay.send("connection-status", { connected: true });
   });
-  pipe.on("connection", (connected: boolean) => overlay.send("connection-status", { connected }));
+  pipe.on("connection", (connected: boolean) => {
+    if (!connected) latestState = null;
+    overlay.send("connection-status", { connected });
+  });
   pipe.on("toggle", () => overlay.toggle());
   pipe.on("log", (message: string) => log(message));
   pipe.start();

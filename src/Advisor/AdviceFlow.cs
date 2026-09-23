@@ -66,7 +66,10 @@ public static class AdviceFlow
     /// <summary>Called from Harmony postfix when a selection screen closes.</summary>
     public static void OnScreenClosed(Node screen)
     {
-        Session.Close(screen);
+        // Publish the cleared state only when the screen that actually owned
+        // this session closed; unrelated close events leave the overlay state
+        // and the run snapshot untouched.
+        if (!Session.Close(screen)) return;
         try
         {
             var snapshot = RunInspector.Capture();
@@ -200,16 +203,18 @@ internal sealed class ScreenSessionState
         return generation;
     }
 
-    public void Close(Node screen)
+    /// <summary>Returns true when the closed screen owned the active session.</summary>
+    public bool Close(Node screen)
     {
         // Several nested selection and event nodes can close during one flow.
         // Only the screen currently supplying advice may invalidate that session.
-        if (!ReferenceEquals(_currentScreen, screen)) return;
+        if (!ReferenceEquals(_currentScreen, screen)) return false;
         _fetchCancellation?.Cancel();
         _fetchCancellation = null;
         _generation++;
         _currentScreen = null;
         AdvisorUi.Clear();
+        return true;
     }
 
     public bool TryGetCurrentScreen(out Node screen)
