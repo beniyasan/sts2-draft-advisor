@@ -70,16 +70,14 @@ public sealed class AnchoredBadge : Control
         if (!_measured)
         {
             _measured = true;
-            BadgeWidth = EventOption
-                ? 300f
-                : Mathf.Clamp(rect.Size.X * gsX * (IsRelic ? 2f : 1f), 150f, 320f);
-            var lx = EventOption ? -BadgeWidth : -BadgeWidth / 2f;
+            BadgeWidth = BadgeLayout.GetWidth(rect.Size.X, gsX, EventOption, IsRelic);
+            var lx = BadgeLayout.GetLeft(EventOption, BadgeWidth);
             var i = 0;
             foreach (var child in GetChildren())
             {
                 if (child is not Control c) continue;
                 // Non-event badges stack upward from the top-edge anchor.
-                var y = EventOption ? i * 17f : -52f + i * 17f;
+                var y = BadgeLayout.GetRowY(EventOption, i);
                 c.Position = new Vector2(lx, y);
                 c.Size = new Vector2(BadgeWidth, c.Size.Y);
                 i++;
