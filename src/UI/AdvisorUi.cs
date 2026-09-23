@@ -31,7 +31,7 @@ public static class AdvisorUi
 
     public static void Render(
         Node screen,
-        IReadOnlyList<OfferAdvice> offers,
+        IReadOnlyList<OfferView> offers,
         IReadOnlyDictionary<string, string> heldNames,
         string? archetypeName,
         double archetypeSimilarity)
@@ -47,7 +47,7 @@ public static class AdvisorUi
         foreach (var offer in offers)
         {
             if (!GodotObject.IsInstanceValid(offer.Node)) continue;
-            var badge = BuildOfferBadge(offer, heldNames);
+            var badge = BuildOfferBadge(offer.Advice, offer.Node, heldNames);
             if (badge != null)
             {
                 offer.Node.AddChild(badge);
@@ -83,23 +83,21 @@ public static class AdvisorUi
     /// centered under cards/relics, docked at the right edge of event buttons.
     /// </summary>
     private static Control? BuildOfferBadge(
-        OfferAdvice offer, IReadOnlyDictionary<string, string> heldNames)
+        OfferAdvice offer, Control node, IReadOnlyDictionary<string, string> heldNames)
     {
         try
         {
             // AnchoredBadge re-anchors inside the offer node's local space;
             // children are authored in screen px, counter-scaled at runtime.
-            var gsX = offer.Node.GetGlobalTransform().X.Length();
-            var bw = offer.IsEventOption
-                ? 300f
-                : offer.Node.Size.X < 20f
-                    ? 240f
-                    : Mathf.Clamp(offer.Node.Size.X * gsX * (offer.IsRelic ? 2f : 1f), 150f, 320f);
+            var gsX = node.GetGlobalTransform().X.Length();
+            var bw = BadgeLayout.GetWidth(
+                node.Size.X, gsX, offer.IsEventOption, offer.IsRelic,
+                node.Size.X < 20f ? 240f : null);
             var root = new AnchoredBadge
             {
                 Name = "DraftAdvisorBadge",
                 MouseFilter = Control.MouseFilterEnum.Ignore,
-                Target = offer.Node,
+                Target = node,
                 EventOption = offer.IsEventOption,
                 IsRelic = offer.IsRelic,
                 BadgeWidth = bw,
@@ -108,79 +106,35 @@ public static class AdvisorUi
             // Event options anchor at the button's right edge (children extend
             // left); cards/relics anchor above the top edge, stacking upward
             // (matches AnchoredBadge's runtime layout pass).
-            var lx = offer.IsEventOption ? -bw : -bw / 2f;
-            var (x1, y1, w1) = offer.IsEventOption ? (lx, 0f, bw) : (lx, -52f, bw);
-            var (x2, y2, w2) = offer.IsEventOption ? (lx, 17f, bw) : (lx, -35f, bw);
-            var (x3, y3, w3) = offer.IsEventOption ? (lx, 34f, bw) : (lx, -18f, bw);
+            var lx = BadgeLayout.GetLeft(offer.IsEventOption, bw);
+            var y1 = BadgeLayout.GetRowY(offer.IsEventOption, 0);
+            var y2 = BadgeLayout.GetRowY(offer.IsEventOption, 1);
+            var y3 = BadgeLayout.GetRowY(offer.IsEventOption, 2);
 
             // --- Rank / context score line ---
-            var line1 = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
-            var rankTxt = offer.AdviceRank is int r && r <= RankColors.Length
-                ? $"#{r}  "
-                : "";
-            var fitTxt = offer.IsRelic
-                ? offer.Metrics is { Score: > 0 } ms
-                    ? $"Score {ms.Score:0}"
-                    : ""
-                : offer.AdviceScore is double sc && sc > 0
-                    ? $"Fit {(int)Math.Round(sc * 100)}%"
-                    : offer.CoachScore is double cs && cs > 0
-                        ? $"Coach {(int)Math.Round(cs)}"
-                        : "";
-            line1.Text = $"{(offer.IsCursed ? "CURSE  " : "")}{rankTxt}{fitTxt}";
-            line1.AddThemeFontSizeOverride("font_size", 17);
-            line1.AddThemeColorOverride("font_color",
-                offer.IsCursed ? new Color("ff5555") : RankColor(offer.AdviceRank));
-            line1.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
-            line1.AddThemeConstantOverride("outline_size", 6);
-            line1.HorizontalAlignment = offer.IsEventOption
-                ? HorizontalAlignment.Right
-                : HorizontalAlignment.Center;
-            line1.Position = new Vector2(x1, y1);
-            line1.Size = new Vector2(w1, 22);
+            var line1 = CreateBadgeLabel(
+                RankScoreText(offer), 17,
+                offer.IsCursed ? new Color("ff5555") : RankColor(offer.AdviceRank),
+                6, offer.IsEventOption, lx, y1, bw, 22);
             root.AddChild(line1);
 
             // --- Metrics line: tier · pick% · win% ---
             var m = offer.Metrics;
-            var line2 = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
-            if (m != null)
-            {
-                var win = $"{m.WinRate:0}%";
-                line2.Text = m.PickRate is double pr
-                    ? $"{m.Tier} · Pick {pr:0}% · Win {win}"
-                    : $"{m.Tier} · Win {win}";
-                line2.AddThemeColorOverride("font_color", TierColors.GetValueOrDefault(m.Tier, TierColors["?"]));
-            }
-            else
-            {
-                line2.Text = "no data";
-                line2.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f));
-            }
-            line2.AddThemeFontSizeOverride("font_size", 13);
-            line2.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
-            line2.AddThemeConstantOverride("outline_size", 5);
-            line2.HorizontalAlignment = offer.IsEventOption
-                ? HorizontalAlignment.Right
-                : HorizontalAlignment.Center;
-            line2.Position = new Vector2(x2, y2);
-            line2.Size = new Vector2(w2, 18);
+            var line2Color = m != null
+                ? TierColors.GetValueOrDefault(m.Tier, TierColors["?"])
+                : new Color(0.6f, 0.6f, 0.6f);
+            var line2 = CreateBadgeLabel(
+                MetricsText(offer), 13, line2Color, 5,
+                offer.IsEventOption, lx, y2, bw, 18);
             root.AddChild(line2);
 
             // --- Reason line: held items driving this pick ---
             var reason = TopReasonText(offer, heldNames);
             if (reason != null)
             {
-                var line3 = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
-                line3.Text = reason;
-                line3.AddThemeFontSizeOverride("font_size", 11);
-                line3.AddThemeColorOverride("font_color", new Color(0.85f, 0.78f, 0.6f));
-                line3.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
-                line3.AddThemeConstantOverride("outline_size", 4);
-                line3.HorizontalAlignment = offer.IsEventOption
-                    ? HorizontalAlignment.Right
-                    : HorizontalAlignment.Center;
-                line3.Position = new Vector2(x3, y3);
-                line3.Size = new Vector2(w3, 16);
+                var line3 = CreateBadgeLabel(
+                    reason, 11, new Color(0.85f, 0.78f, 0.6f), 4,
+                    offer.IsEventOption, lx, y3, bw, 16);
                 root.AddChild(line3);
             }
 
@@ -191,6 +145,52 @@ public static class AdvisorUi
             Log.Error($"[DraftAdvisor] BuildOfferBadge({offer.Id}): {ex.Message}");
             return null;
         }
+    }
+
+    private static Label CreateBadgeLabel(
+        string text, int fontSize, Color fontColor, int outlineSize,
+        bool isEventOption, float x, float y, float width, float height)
+    {
+        var label = new Label { MouseFilter = Control.MouseFilterEnum.Ignore };
+        label.Text = text;
+        label.AddThemeFontSizeOverride("font_size", fontSize);
+        label.AddThemeColorOverride("font_color", fontColor);
+        label.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
+        label.AddThemeConstantOverride("outline_size", outlineSize);
+        label.HorizontalAlignment = isEventOption
+            ? HorizontalAlignment.Right
+            : HorizontalAlignment.Center;
+        label.Position = new Vector2(x, y);
+        label.Size = new Vector2(width, height);
+        return label;
+    }
+
+    private static string RankScoreText(OfferAdvice offer)
+    {
+        var rankTxt = offer.AdviceRank is int r && r <= RankColors.Length
+            ? $"#{r}  "
+            : "";
+        var fitTxt = offer.IsRelic
+            ? offer.Metrics is { Score: > 0 } ms
+                ? $"Score {ms.Score:0}"
+                : ""
+            : offer.AdviceScore is double sc && sc > 0
+                ? $"Fit {(int)Math.Round(sc * 100)}%"
+                : offer.CoachScore is double cs && cs > 0
+                    ? $"Coach {(int)Math.Round(cs)}"
+                    : "";
+        return $"{(offer.IsCursed ? "CURSE  " : "")}{rankTxt}{fitTxt}";
+    }
+
+    private static string MetricsText(OfferAdvice offer)
+    {
+        var m = offer.Metrics;
+        if (m == null) return "no data";
+
+        var win = $"{m.WinRate:0}%";
+        return m.PickRate is double pr
+            ? $"{m.Tier} · Pick {pr:0}% · Win {win}"
+            : $"{m.Tier} · Win {win}";
     }
 
     /// <summary>Cards: "pairs: Setup Strike ×3.0". Relics: "pairs: Mad Science".</summary>
@@ -209,7 +209,7 @@ public static class AdvisorUi
         {
             var name = heldNames.TryGetValue(r.From, out var n)
                 ? n
-                : AdviceFlow.Prettify(r.From.Contains(':')
+                : DisplayNameFormatter.Prettify(r.From.Contains(':')
                     ? r.From[(r.From.IndexOf(':') + 1)..]
                     : r.From);
             parts.Add($"{name} ×{r.Lift:0.#}");

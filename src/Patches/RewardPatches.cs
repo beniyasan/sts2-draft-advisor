@@ -30,8 +30,8 @@ public static class CardRewardRefreshPatch
 public static class CardRewardClosedPatch
 {
     [HarmonyPostfix]
-    public static void AfterClosed()
-        => AdviceFlow.OnScreenClosed();
+    public static void AfterClosed(NCardRewardSelectionScreen __instance)
+        => AdviceFlow.OnScreenClosed(__instance);
 }
 
 /// <summary>
@@ -49,8 +49,8 @@ public static class ChooseCardOpenedPatch
 public static class ChooseCardClosedPatch
 {
     [HarmonyPostfix]
-    public static void AfterClosed()
-        => AdviceFlow.OnScreenClosed();
+    public static void AfterClosed(NChooseACardSelectionScreen __instance)
+        => AdviceFlow.OnScreenClosed(__instance);
 }
 
 /// <summary>
@@ -68,8 +68,8 @@ public static class ChooseRelicOpenedPatch
 public static class ChooseRelicClosedPatch
 {
     [HarmonyPostfix]
-    public static void AfterClosed()
-        => AdviceFlow.OnScreenClosed();
+    public static void AfterClosed(NChooseARelicSelection __instance)
+        => AdviceFlow.OnScreenClosed(__instance);
 }
 
 /// <summary>
@@ -90,8 +90,8 @@ public static class MerchantOpenedPatch
 public static class MerchantClosedPatch
 {
     [HarmonyPostfix]
-    public static void AfterClosed()
-        => AdviceFlow.OnScreenClosed();
+    public static void AfterClosed(NMerchantInventory __instance)
+        => AdviceFlow.OnScreenClosed(__instance);
 }
 
 /// <summary>
@@ -132,6 +132,6 @@ public static class EventOptionsAddedPatch
 public static class EventLayoutClosedPatch
 {
     [HarmonyPostfix]
-    public static void AfterClosed()
-        => AdviceFlow.OnScreenClosed();
+    public static void AfterClosed(NEventLayout __instance)
+        => AdviceFlow.OnScreenClosed(__instance);
 }

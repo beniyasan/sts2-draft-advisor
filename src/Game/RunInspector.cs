@@ -24,41 +24,39 @@ public static class RunInspector
         public Dictionary<string, string> ItemNames { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>Most recent player seen; falls back to scene-tree lookup.</summary>
-    private static Player? _lastPlayer;
-
     public static Snapshot? Capture()
     {
         try
         {
-            var player = _lastPlayer ?? FindPlayer();
+            // Resolve from the active run each time so a new run cannot inherit
+            // the player object captured from the previous run.
+            var player = FindPlayer();
             if (player == null)
             {
                 Log.Error("[DraftAdvisor] no Player found (not in a run?)");
                 return null;
             }
-            _lastPlayer = player;
 
             var snap = new Snapshot();
 
             foreach (var card in player.Deck.Cards)
             {
-                var id = NormalizeId(EntryOf(card));
+                var id = NormalizeId(ModelAccess.EntryOf(card));
                 if (string.IsNullOrEmpty(id)) continue;
                 snap.DeckCardIds.Add(id);
                 snap.HeldItems.Add($"cards:{id}");
-                var title = SafeTitle(card);
+                var title = ModelAccess.SafeTitle(card);
                 if (!string.IsNullOrEmpty(title))
                     snap.ItemNames[$"cards:{id}"] = title;
             }
 
             foreach (var relic in player.Relics)
             {
-                var id = NormalizeId(EntryOf(relic));
+                var id = NormalizeId(ModelAccess.EntryOf(relic));
                 if (string.IsNullOrEmpty(id)) continue;
                 snap.RelicIds.Add(id);
                 snap.HeldItems.Add($"relics:{id}");
-                var title = SafeTitle(relic);
+                var title = ModelAccess.SafeTitle(relic);
                 if (!string.IsNullOrEmpty(title))
                     snap.ItemNames[$"relics:{id}"] = title;
             }
@@ -71,11 +69,6 @@ public static class RunInspector
             Log.Error($"[DraftAdvisor] Capture failed: {ex.Message}");
             return null;
         }
-    }
-
-    private static string? EntryOf(AbstractModel model)
-    {
-        try { return model.Id.Entry; } catch { return null; }
     }
 
     /// <summary>Convert a model Id.Entry into the spire-codex id form (uppercase, no CARD_ prefix).</summary>
@@ -122,24 +115,6 @@ public static class RunInspector
             Log.Error($"[DraftAdvisor] FindPlayer failed: {ex.Message}");
             return null;
         }
-    }
-
-    /// <summary>Title is a string on cards but a LocString on relics.</summary>
-    private static string? SafeTitle(AbstractModel model)
-    {
-        try
-        {
-            var v = model.GetType().GetProperty("Title",
-                    BindingFlags.Public | BindingFlags.Instance)
-                ?.GetValue(model);
-            if (v == null) return null;
-            if (v is string s) return s;
-            var fmt = v.GetType().GetMethod("GetFormattedText",
-                BindingFlags.Public | BindingFlags.Instance, Type.EmptyTypes);
-            if (fmt?.Invoke(v, null) is string fs) return fs;
-            return v.ToString();
-        }
-        catch { return null; }
     }
 
     private static string ResolveCharacter(Player player)

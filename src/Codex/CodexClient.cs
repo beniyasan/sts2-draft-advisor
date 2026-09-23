@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net.Http.Json;
 using System.Text.Json;
 using MegaCrit.Sts2.Core.Logging;
@@ -13,9 +12,6 @@ namespace DraftAdvisor.Codex;
 public static class CodexClient
 {
     private const string BaseUrl = "https://spire-codex.com";
-
-    /// <summary>Metrics table is a few hundred rows; cache once per session.</summary>
-    private static readonly TimeSpan MetricsTtl = TimeSpan.FromMinutes(30);
 
     private static readonly HttpClient Http = new()
     {
@@ -32,28 +28,18 @@ public static class CodexClient
         PropertyNameCaseInsensitive = true,
     };
 
-    private static readonly ConcurrentDictionary<string, (Dictionary<string, MetricRow> Map, DateTime At)> _metricsCaches = new();
-    private static readonly SemaphoreSlim _metricsLock = new(1, 1);
+    private static readonly MetricsTableCache MetricsCache = new();
 
     /// <summary>
     /// POST /api/draft-advice — rank offered cards against the current deck.
     /// Deck items are "cards:ID" / "relics:ID".
     /// </summary>
     public static async Task<DraftAdviceResponse?> GetDraftAdvice(
-        IReadOnlyList<string> deck, IReadOnlyList<string> offered)
+        IReadOnlyList<string> deck, IReadOnlyList<string> offered, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var body = new { deck, offered, lang = "eng" };
-            using var resp = await Http.PostAsJsonAsync("/api/draft-advice", body);
-            resp.EnsureSuccessStatusCode();
-            return await resp.Content.ReadFromJsonAsync<DraftAdviceResponse>(JsonOpts);
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[DraftAdvisor] draft-advice failed: {ex.Message}");
-            return null;
-        }
+        var body = new { deck, offered, lang = "eng" };
+        return await PostJsonAsync<DraftAdviceResponse>(
+            "/api/draft-advice", body, "draft-advice failed", cancellationToken);
     }
 
     /// <summary>
@@ -61,86 +47,83 @@ public static class CodexClient
     /// </summary>
     public static async Task<PickCoachResponse?> GetPickCoach(
         string character, IReadOnlyList<string> cardIds,
-        IReadOnlyList<string> relicIds, IReadOnlyList<string> offered)
+        IReadOnlyList<string> relicIds, IReadOnlyList<string> offered,
+        CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var url = "/api/runs/pick-coach"
-                + $"?character={Uri.EscapeDataString(character.ToLowerInvariant())}"
-                + $"&cards={Uri.EscapeDataString(string.Join(",", cardIds))}"
-                + $"&relics={Uri.EscapeDataString(string.Join(",", relicIds))}"
-                + $"&offer={Uri.EscapeDataString(string.Join(",", offered))}";
-            return await Http.GetFromJsonAsync<PickCoachResponse>(url, JsonOpts);
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[DraftAdvisor] pick-coach failed: {ex.Message}");
-            return null;
-        }
+        var url = "/api/runs/pick-coach"
+            + $"?character={Uri.EscapeDataString(character.ToLowerInvariant())}"
+            + $"&cards={Uri.EscapeDataString(string.Join(",", cardIds))}"
+            + $"&relics={Uri.EscapeDataString(string.Join(",", relicIds))}"
+            + $"&offer={Uri.EscapeDataString(string.Join(",", offered))}";
+        return await GetJsonAsync<PickCoachResponse>(url, "pick-coach failed", cancellationToken);
     }
 
-    /// <summary>GET /api/runs/metrics/cards — cached for <see cref="MetricsTtl"/>.</summary>
-    public static Task<Dictionary<string, MetricRow>?> GetCardMetrics() => GetMetricsTable("cards");
+    /// <summary>GET /api/runs/metrics/cards — cached for 30 minutes.</summary>
+    public static Task<Dictionary<string, MetricRow>?> GetCardMetrics(CancellationToken cancellationToken = default) => GetMetricsTable("cards", cancellationToken);
 
-    /// <summary>GET /api/runs/metrics/relics — cached for <see cref="MetricsTtl"/>.</summary>
-    public static Task<Dictionary<string, MetricRow>?> GetRelicMetrics() => GetMetricsTable("relics");
+    /// <summary>GET /api/runs/metrics/relics — cached for 30 minutes.</summary>
+    public static Task<Dictionary<string, MetricRow>?> GetRelicMetrics(CancellationToken cancellationToken = default) => GetMetricsTable("relics", cancellationToken);
 
     /// <summary>
     /// GET /api/runs/metrics/{entity} — full metrics table (tier, elo, pick%, win%).
     /// Relics rows have no pick_rate/elo — those fields stay null.
     /// </summary>
-    private static async Task<Dictionary<string, MetricRow>?> GetMetricsTable(string entityType)
+    private static async Task<Dictionary<string, MetricRow>?> GetMetricsTable(string entityType, CancellationToken cancellationToken)
     {
-        _metricsCaches.TryGetValue(entityType, out var hit);
-        if (hit.Map != null && DateTime.UtcNow - hit.At < MetricsTtl)
-            return hit.Map;
-
-        await _metricsLock.WaitAsync();
-        try
-        {
-            _metricsCaches.TryGetValue(entityType, out hit);
-            if (hit.Map != null && DateTime.UtcNow - hit.At < MetricsTtl)
-                return hit.Map;
-
-            var resp = await Http.GetFromJsonAsync<MetricsResponse>(
-                $"/api/runs/metrics/{entityType}?bracket=all", JsonOpts);
-            if (resp?.Rows == null) return hit.Map;
-
-            var map = new Dictionary<string, MetricRow>(StringComparer.OrdinalIgnoreCase);
-            foreach (var row in resp.Rows)
-                if (!string.IsNullOrEmpty(row.Id))
-                    map[row.Id] = row;
-
-            _metricsCaches[entityType] = (map, DateTime.UtcNow);
-            Log.Info($"[DraftAdvisor] metrics cached: {map.Count} {entityType}");
-            return map;
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[DraftAdvisor] metrics({entityType}) failed: {ex.Message}");
-            return hit.Map;
-        }
-        finally
-        {
-            _metricsLock.Release();
-        }
+        // Metrics refreshes belong to the shared cache, so screen cancellation
+        // stops this caller waiting without cancelling or discarding the refresh.
+        return await MetricsCache.GetAsync(entityType, () => GetJsonAsync<MetricsResponse>(
+            $"/api/runs/metrics/{entityType}?bracket=all", $"metrics({entityType}) failed"))
+            .WaitAsync(cancellationToken);
     }
 
     /// <summary>
     /// GET /api/pairings/relics/{id} — cards most associated with this relic.
     /// partners.cards ∩ the player's deck explains "which held cards want this relic".
     /// </summary>
-    public static async Task<PairingsResponse?> GetRelicPairings(string relicId)
+    public static async Task<PairingsResponse?> GetRelicPairings(string relicId, CancellationToken cancellationToken = default)
+    {
+        return await GetJsonAsync<PairingsResponse>(
+            $"/api/pairings/relics/{relicId}", $"pairings({relicId}) failed", cancellationToken);
+    }
+
+    private static Task<T?> GetJsonAsync<T>(string url, string failureContext, CancellationToken cancellationToken = default) =>
+        ExecuteJsonRequestAsync<T>(HttpMethod.Get, url, null, failureContext, cancellationToken);
+
+    private static Task<T?> PostJsonAsync<T>(string url, object body, string failureContext, CancellationToken cancellationToken = default) =>
+        ExecuteJsonRequestAsync<T>(HttpMethod.Post, url, body, failureContext, cancellationToken);
+
+    private static async Task<T?> ExecuteJsonRequestAsync<T>(
+        HttpMethod method, string url, object? body, string failureContext, CancellationToken cancellationToken)
     {
         try
         {
-            return await Http.GetFromJsonAsync<PairingsResponse>(
-                $"/api/pairings/relics/{relicId}", JsonOpts);
+            using (var request = new HttpRequestMessage(method, url))
+            {
+                if (body != null)
+                    request.Content = JsonContent.Create(body);
+
+                using (var response = await Http.SendAsync(request, cancellationToken))
+                {
+                    response.EnsureSuccessStatusCode();
+                    return await response.Content.ReadFromJsonAsync<T>(JsonOpts, cancellationToken);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            Log.Error($"[DraftAdvisor] pairings({relicId}) failed: {ex.Message}");
-            return null;
+            LogRequestFailure(failureContext, ex);
+            return default;
         }
     }
+
+    private static Task<T?> ReadJsonAsync<T>(HttpResponseMessage response) =>
+        response.Content.ReadFromJsonAsync<T>(JsonOpts);
+
+    private static void LogRequestFailure(string failureContext, Exception exception) =>
+        Log.Error($"[DraftAdvisor] {failureContext}: {exception.Message}");
 }
